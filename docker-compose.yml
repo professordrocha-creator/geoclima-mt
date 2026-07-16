@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: geoclima_db
+    environment:
+      POSTGRES_DB: geoclima
+      POSTGRES_USER: geoclima_user
+      POSTGRES_PASSWORD: geoclima_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - geoclima_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: geoclima_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - geoclima_net
+
+  web:
+    build: .
+    container_name: geoclima_web
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - DB_NAME=geoclima
+      - DB_USER=geoclima_user
+      - DB_PASSWORD=geoclima_password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      # Google Earth Engine (Etapa 3 — CHIRPS). Chave da conta de serviço
+      # montada automaticamente via bind mount "./:/app" (ver secrets/).
+      - GEE_PROJECT_ID=climatga
+      - GEE_SERVICE_ACCOUNT_KEY_PATH=/app/secrets/gee-key.json
+    depends_on:
+      - db
+      - redis
+    networks:
+      - geoclima_net
+
+  celery_worker:
+    build: .
+    container_name: geoclima_worker
+    command: celery -A geoclima worker --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - DEBUG=True
+      - DB_NAME=geoclima
+      - DB_USER=geoclima_user
+      - DB_PASSWORD=geoclima_password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      # Google Earth Engine (Etapa 3 — CHIRPS). Sem task Celery ainda
+      # (Etapa 3.3), mas já deixamos o worker pronto com as mesmas
+      # credenciais do "web" para quando ela existir.
+      - GEE_PROJECT_ID=climatga
+      - GEE_SERVICE_ACCOUNT_KEY_PATH=/app/secrets/gee-key.json
+    depends_on:
+      - db
+      - redis
+    networks:
+      - geoclima_net
+
+  celery_beat:
+    # Agendador (Etapa 3.3). Serviço SEPARADO do celery_worker de propósito:
+    # rodar o beat embutido no worker (`celery worker -B`) só é seguro com
+    # exatamente 1 worker — se o projeto escalar `celery_worker` para mais
+    # réplicas no futuro, um beat embutido em cada réplica dispararia a
+    # mesma tarefa em duplicidade. Um serviço `celery_beat` único evita
+    # isso independente de quantos workers existirem. Ver docs/DECISOES.md.
+    build: .
+    container_name: geoclima_beat
+    # --schedule aponta para /tmp (fora do bind mount) para não sujar o
+    # repositório com o arquivo de estado do agendador (celerybeat-schedule).
+    command: celery -A geoclima beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    volumes:
+      - .:/app
+    environment:
+      - DEBUG=True
+      - DB_NAME=geoclima
+      - DB_USER=geoclima_user
+      - DB_PASSWORD=geoclima_password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      - GEE_PROJECT_ID=climatga
+      - GEE_SERVICE_ACCOUNT_KEY_PATH=/app/secrets/gee-key.json
+    depends_on:
+      - db
+      - redis
+    networks:
+      - geoclima_net
+
+volumes:
+  pgdata:
+
+networks:
+  geoclima_net:
+    driver: bridge

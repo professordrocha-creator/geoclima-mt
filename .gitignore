@@ -1,0 +1,27 @@
+# Database persistence folders
+postgres_data/
+pgadmin_data/
+
+# Arquivos de origem grandes (malhas territoriais do IBGE etc.).
+# Ver docstring de maps/management/commands/import_municipios.py para
+# onde baixar cada arquivo antes de rodar o import.
+data/
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables and keys
+.env
+secret_key.txt
+
+# Chaves e segredos (nunca versionar) — ex.: secrets/gee-key.json
+# (conta de serviço do Google Earth Engine, projeto climatga)
+secrets/
+
+# Virtual environments
+venv/
+.venv/
+env/

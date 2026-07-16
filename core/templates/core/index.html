@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoClima MT</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body, html { height: 100%; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; color: #333; }
+        .navbar { background-color: #1a1a1a !important; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .btn-login { background-color: #ff6b6b; border-color: #ff6b6b; font-weight: 600; padding: 0.5rem 1.2rem; border-radius: 0.5rem; }
+        
+        /* CARDS PRINCIPAIS */
+        .current-weather-card { background-color: #ffffff; border-radius: 1rem; padding: 2rem; margin-bottom: 1.5rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); text-align: center; height: 380px; transition: background 0.8s ease, color 0.8s ease; }
+        .current-temp-main { display: flex; align-items: center; justify-content: center; gap: 1.5rem; margin-bottom: 1rem; }
+        .current-temp-value { font-size: 4.5rem; font-weight: 700; color: #343a40; }
+        .current-weather-icon { font-size: 5rem; color: #0d6efd; }
+        .current-condition { font-size: 1.6rem; font-weight: 500; color: #495057; }
+        .current-feels-like { font-size: 1.2rem; color: #6c757d; }
+        .current-description-text { font-size: 1rem; color: #6c757d; margin-top: 1rem; line-height: 1.5; }
+
+        /* SEÇÃO DO MAPA */
+        .map-section { width: 100%; height: 380px; border-radius: 1rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); z-index: 0; }
+
+        /* SELETOR DE LOCALIDADE (Estado/Cidade) */
+        .locality-selector-card { background-color: #ffffff; border-radius: 1rem; padding: 1.25rem 1.5rem; margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        /* MICRO DETALHES */
+        .micro-details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1rem; background-color: #ffffff; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 1.5rem; }
+        .micro-detail-item { text-align: center; padding: 0.5rem; border-bottom: 1px solid #f0f2f5; transition: transform 0.3s ease, box-shadow 0.3s ease; border-radius: 0.8rem; }
+        .micro-detail-item:hover { transform: translateY(-4px); box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+        .micro-detail-title { font-size: 0.85rem; color: #6c757d; margin-bottom: 0.3rem; }
+        .micro-detail-value { font-size: 1.1rem; font-weight: 600; color: #343a40; }
+
+        /* PREVISÕES CHIPS / HORÁRIA / DIÁRIA */
+        .hourly-forecast-section, .daily-forecast-section { background-color: #ffffff; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .hourly-list { display: flex; overflow-x: auto; gap: 1rem; padding-bottom: 0.5rem; }
+        .hourly-card { flex: 0 0 auto; width: 100px; text-align: center; background-color: #f8f9fa; border-radius: 0.8rem; padding: 1rem 0.5rem; box-shadow: 0 2px 6px rgba(0,0,0,0.03); transition: transform 0.3s ease, box-shadow 0.3s ease; }
+        .hourly-card:hover { transform: translateY(-4px); box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+        .daily-list { display: flex; flex-direction: column; gap: 0.8rem; }
+        .daily-card { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; background-color: #f8f9fa; border-radius: 0.8rem; box-shadow: 0 2px 6px rgba(0,0,0,0.03); transition: transform 0.3s ease, box-shadow 0.3s ease; }
+        .daily-card:hover { transform: translateY(-4px); box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+        .daily-name { font-weight: 600; color: #343a40; width: 20%; }
+        .daily-icon { font-size: 1.5rem; color: #0d6efd; text-align: center; width: 20%; }
+        .daily-temps { display: flex; gap: 1rem; justify-content: flex-end; width: 30%; }
+        .daily-temp-max { font-weight: 600; color: #dc3545; }
+        .daily-temp-min { font-weight: 600; color: #0d6efd; }
+
+        /* Novos estilos para a seção de Mapas Agrícolas */
+        .agricultural-map-card {
+            background-color: #ffffff;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+            text-align: center;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            height: 100%; /* Garante que o card ocupe a altura total da coluna */
+        }
+
+        .agricultural-map-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px rgba(0,0,0,0.08);
+        }
+
+        .agricultural-map-card .card-icon {
+            font-size: 3rem;
+            color: #28a745; /* Verde para ícones agrícolas */
+            margin-bottom: 1rem;
+        }
+
+        .agricultural-map-card .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #343a40;
+            margin-bottom: 0.5rem;
+        }
+
+        .agricultural-map-card .card-description {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-bottom: 1rem;
+        }
+
+        .agricultural-map-card .btn-access {
+            background-color: #28a745; /* Verde Bootstrap */
+            border-color: #28a745;
+            color: #fff;
+            font-weight: 600;
+            padding: 0.5rem 1.5rem;
+            border-radius: 0.5rem;
+        }
+
+        .agricultural-map-card .badge-info {
+            background-color: #17a2b8; /* Bootstrap info blue */
+            color: #fff;
+            font-size: 0.75rem;
+            padding: 0.3em 0.6em;
+            border-radius: 0.25rem;
+            vertical-align: middle;
+            margin-left: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- NAVBAR -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">🌍 GeoClima MT</a>
+            <div class="ms-auto">
+                {% if user.is_authenticated %}
+                    <a href="{% url 'dashboard:painel' %}" class="btn btn-login btn-sm text-white">👤 Meu Painel</a>
+                {% else %}
+                    <a href="{% url 'accounts:login' %}" class="btn btn-login btn-sm text-white">🔒 Acessar Painel (Login)</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <!-- CONTAINER PRINCIPAL -->
+    <div class="container-fluid mt-3">
+        <!-- BLOCO: SELETOR DE LOCALIDADE (Estado / Cidade) -->
+        <div class="row">
+            <div class="col-12">
+                <div class="locality-selector-card">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-6 col-md-3">
+                            <label for="estadoSelect" class="form-label small mb-1">Estado</label>
+                            <select id="estadoSelect" class="form-select form-select-sm">
+                                <option>Carregando...</option>
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label for="cidadeSelect" class="form-label small mb-1">Cidade</label>
+                            <select id="cidadeSelect" class="form-select form-select-sm">
+                                <option>Carregando...</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <small class="text-muted" id="localitySelectorHint">
+                                Ao escolher a cidade, o mapa mostra o contorno do município e o clima é recarregado no centro dele.
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12 col-md-5 col-lg-4">
+                <!-- BLOCO: CLIMA ATUAL -->
+                <div class="current-weather-card" id="currentWeatherCard" style="height: 380px; overflow: hidden;">
+                    <div class="current-temp-main">
+                        <span class="current-temp-value" id="currentTemp">--°C</span>
+                        <i class="current-weather-icon" id="currentIcon"></i>
+                    </div>
+                    <div class="current-condition" id="currentCondition">Carregando...</div>
+                    <div class="current-feels-like">Sensação térmica: <span id="currentFeelsLike">--°C</span></div>
+                    <p class="current-description-text" id="currentDescriptionText"></p>
+                </div>
+            </div>
+            <div class="col-12 col-md-7 col-lg-8">
+                <!-- MAPA -->
+                <div id="map" class="map-section" style="height: 380px; overflow: hidden;"></div>
+            </div>
+        </div>
+
+        <!-- BLOCO: MICRO-DETALHES -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="micro-details-grid">
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Vento</div>
+                            <div class="micro-detail-value" id="detailWind">-- km/h</div>
+                        </div>
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Rajada Máxima</div>
+                            <div class="micro-detail-value" id="detailWindGusts">-- km/h</div>
+                        </div>
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Umidade</div>
+                            <div class="micro-detail-value" id="detailHumidity">--%</div>
+                        </div>
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Chuva (1h)</div>
+                            <div class="micro-detail-value" id="detailPrecipitation">-- mm</div>
+                        </div>
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Chuva (Dia)</div>
+                            <div class="micro-detail-value" id="detailPrecipitationSum">-- mm</div>
+                        </div>
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Visibilidade</div>
+                            <div class="micro-detail-value" id="detailVisibility">-- km</div>
+                        </div>
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Pressão</div>
+                            <div class="micro-detail-value" id="detailPressure">-- hPa</div>
+                        </div>
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Índice UV</div>
+                            <div class="micro-detail-value" id="detailUvIndex">--</div>
+                        </div>
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Nascer do Sol</div>
+                            <div class="micro-detail-value" id="detailSunrise">--</div>
+                        </div>
+                        <div class="micro-detail-item">
+                            <div class="micro-detail-title">Pôr do Sol</div>
+                            <div class="micro-detail-value" id="detailSunset">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BLOCO: POR HORA -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="hourly-forecast-section">
+                    <h6 class="section-title">Por Hora</h6>
+                    <div class="hourly-list" id="hourlyForecastList">
+                        <!-- Previsão por hora será injetada aqui pelo JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BLOCO: PREVISÃO DE 7 DIAS -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="daily-forecast-section">
+                    <h6 class="section-title">Previsão de 7 Dias</h6>
+                    <div class="daily-list" id="dailyForecastList">
+                        <!-- Previsão de dias será injetada aqui pelo JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BLOCO: MAPAS AGRÍCOLAS DO BRASIL -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mt-4 mb-3">
+                    <h5 class="fw-bold m-0" style="color: #1a1a1a;">Mapas Agrícolas do Brasil</h5>
+                    <a href="#" class="text-success text-decoration-none fw-semibold small">Mais mapas</a>
+                </div>
+                <div class="row g-3">
+                    <!-- Card 1: Satélite -->
+                    <div class="col-12 col-sm-6 col-md-3">
+                        <div class="agricultural-map-card">
+                            <i class="fas fa-satellite-dish card-icon"></i>
+                            <div class="card-title">Satélite</div>
+                            <div class="card-description">Acesse mapa de satélite</div>
+                            <a href="#" class="btn btn-access btn-sm">Acessar</a>
+                        </div>
+                    </div>
+                    <!-- Card 2: Previsão de Queimadas -->
+                    <div class="col-12 col-sm-6 col-md-3">
+                        <div class="agricultural-map-card">
+                            <i class="fas fa-fire card-icon"></i>
+                            <div class="card-title">Previsão de Queimadas</div>
+                            <div class="card-description">Acesse mapa de queimadas</div>
+                            <a href="#" class="btn btn-access btn-sm">Acessar</a>
+                        </div>
+                    </div>
+                    <!-- Card 3: Chuva Acumulada -->
+                    <div class="col-12 col-sm-6 col-md-3">
+                        <div class="agricultural-map-card">
+                            <i class="fas fa-cloud-showers-heavy card-icon"></i>
+                            <div class="card-title">Chuva Acumulada <span class="badge badge-info">CHIRPS</span></div>
+                            <div class="card-description">Acesse mapa de chuva acumulada (CHIRPS)</div>
+                            <a href="#" class="btn btn-access btn-sm">Acessar</a>
+                        </div>
+                    </div>
+                    <!-- Card 4: Temperatura -->
+                    <div class="col-12 col-sm-6 col-md-3">
+                        <div class="agricultural-map-card">
+                            <i class="fas fa-thermometer-half card-icon"></i>
+                            <div class="card-title">Temperatura</div>
+                            <div class="card-description">Acesse mapa de temperatura</div>
+                            <a href="#" class="btn btn-access btn-sm">Acessar</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- NOVO BLOCO: RADAR METEOROLÓGICO -->
+        <div class="row mt-4 mb-4">
+            <div class="col-12">
+                <div class="card p-3 shadow-sm" style="border-radius: 1rem; background-color: #ffffff;">
+                    <h5 class="fw-bold mb-3" style="color: #1a1a1a;">📡 Monitoramento Meteorológico em Tempo Real (Satélite e Radar)</h5>
+                    <div class="radar-container" style="position: relative; width: 100%; height: 450px; border-radius: 0.8rem; overflow: hidden;">
+                         <iframe 
+    src="https://embed.windy.com/embed2.html?lat=-13.200&lon=-56.500&zoom=6&level=surface&overlay=radar&product=radar&menu=true&message=true&marker=true&calendar=now&pressure=true&type=map&location=coordinates&detail=true&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
+    style="width: 100%; height: 100%; border: none;" 
+    allowfullscreen>
+</iframe>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Mapeamento de weather_code para textos e ícones (duplicado para frontend e backend para segurança)
+        const WEATHER_CODE_MAPPING = {
+            0: { text: "Céu Limpo", icon: "fas fa-sun" },
+            1: { text: "Principalmente Limpo", icon: "fas fa-sun" },
+            2: { text: "Parcialmente Nublado", icon: "fas fa-cloud-sun" },
+            3: { text: "Nublado", icon: "fas fa-cloud" },
+            45: { text: "Névoa", icon: "fas fa-smog" },
+            48: { text: "Névoa Congelante", icon: "fas fa-smog" },
+            51: { text: "Chuvisco Leve", icon: "fas fa-cloud-rain" },
+            53: { text: "Chuvisco Moderado", icon: "fas fa-cloud-rain" },
+            55: { text: "Chuvisco Denso", icon: "fas fa-cloud-rain" },
+            56: { text: "Chuvisco Congelante Leve", icon: "fas fa-cloud-showers-heavy" },
+            57: { text: "Chuvisco Congelante Denso", icon: "fas fa-cloud-showers-heavy" },
+            61: { text: "Chuva Leve", icon: "fas fa-cloud-showers-heavy" },
+            63: { text: "Chuva Moderada", icon: "fas fa-cloud-showers-heavy" },
+            65: { text: "Chuva Forte", icon: "fas fa-cloud-showers-heavy" },
+            66: { text: "Chuva Congelante Leve", icon: "fas fa-cloud-showers-heavy" },
+            67: { text: "Chuva Congelante Forte", icon: "fas fa-cloud-showers-heavy" },
+            71: { text: "Queda de Neve Leve", icon: "fas fa-snowflake" },
+            73: { text: "Queda de Neve Moderada", icon: "fas fa-snowflake" },
+            75: { text: "Queda de Neve Forte", icon: "fas fa-snowflake" },
+            77: { text: "Grãos de Neve", icon: "fas fa-snowflake" },
+            80: { text: "Pancadas de Chuva Leves", icon: "fas fa-cloud-showers-heavy" },
+            81: { text: "Pancadas de Chuva Moderadas", icon: "fas fa-cloud-showers-heavy" },
+            82: { text: "Pancadas de Chuva Violentas", icon: "fas fa-cloud-showers-heavy" },
+            85: { text: "Pancadas de Neve Leves", icon: "fas fa-snowflake" },
+            86: { text: "Pancadas de Neve Fortes", icon: "fas fa-snowflake" },
+            95: { text: "Trovoada Leve ou Moderada", icon: "fas fa-bolt" },
+            96: { text: "Trovoada com Granizo Leve", icon: "fas fa-bolt" },
+            99: { text: "Trovoada com Granizo Forte", icon: "fas fa-bolt" }
+        };
+
+        function getWeatherDisplayInfo(code) {
+            return WEATHER_CODE_MAPPING[code] || { text: "Desconhecido", icon: "fas fa-question-circle" };
+        }
+
+        // ==================== DADOS CLIMÁTICOS ====================
+        async function loadWeatherData(lat, lon) {
+            const defaultLat = -13.0; // Centro de Mato Grosso
+            const defaultLon = -56.0; // Centro de Mato Grosso
+
+            const latitude = lat || defaultLat;
+            const longitude = lon || defaultLon;
+
+            const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,surface_pressure,wind_speed_10m,weather_code,precipitation,visibility&daily=temperature_2m_max,temperature_2m_min,uv_index_max,sunrise,sunset,precipitation_sum,wind_gusts_10m_max,weather_code&hourly=temperature_2m,weather_code&timezone=auto&forecast_days=7`;
+            const airQualityUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${latitude}&longitude=${longitude}&current=us_aqi&timezone=auto`;
+
+            try {
+                const [forecastResponse, airQualityResponse] = await Promise.all([
+                    fetch(forecastUrl),
+                    fetch(airQualityUrl)
+                ]);
+
+                if (!forecastResponse.ok) throw new Error(`HTTP error! status: ${forecastResponse.status} from Forecast API`);
+                if (!airQualityResponse.ok) throw new Error(`HTTP error! status: ${airQualityResponse.status} from Air Quality API`);
+
+                const forecastData = await forecastResponse.json();
+                const airQualityData = await airQualityResponse.json();
+
+                console.log("Dados recebidos da API Forecast:", forecastData);
+                console.log("Dados recebidos da API Air Quality:", airQualityData);
+
+                const current = forecastData.current;
+                const hourly = forecastData.hourly;
+                const daily = forecastData.daily;
+                const currentAirQuality = airQualityData.current;
+
+                // Adicionar AQI, UV, nascer/pôr do sol, precipitação e rajada de vento aos dados atuais para simplificar a injeção
+                const processedCurrent = {
+                    temperature: current.temperature_2m,
+                    apparent_temperature: current.apparent_temperature,
+                    relative_humidity: current.relative_humidity_2m,
+                    wind_speed: current.wind_speed_10m,
+                    surface_pressure: current.surface_pressure,
+                    weather_code: current.weather_code,
+                    weather_description: getWeatherDisplayInfo(current.weather_code).text,
+                    weather_icon: getWeatherDisplayInfo(current.weather_code).icon,
+                    precipitation: current.precipitation,
+                    visibility: current.visibility, // Adicionado visibilidade
+                    us_aqi: currentAirQuality ? currentAirQuality.us_aqi : null,
+                    uv_index_max: daily.uv_index_max ? daily.uv_index_max[0] : null, // O primeiro dia é o atual
+                    sunrise: daily.sunrise ? new Date(daily.sunrise[0]).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null,
+                    sunset: daily.sunset ? new Date(daily.sunset[0]).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null,
+                    precipitation_sum: daily.precipitation_sum ? daily.precipitation_sum[0] : null, // Acumulado do dia
+                    wind_gusts_10m_max: daily.wind_gusts_10m_max ? daily.wind_gusts_10m_max[0] : null, // Rajada máxima
+                };
+
+                populateCurrentWeather(processedCurrent);
+                populateHourlyForecast(hourly);
+                populateDailyForecast(daily);
+                updateMainCardBackground(processedCurrent.weather_code);
+
+            } catch (error) {
+                console.error("Erro ao carregar dados climáticos:", error);
+                const errorMessage = `Erro ao carregar dados: ${error.message}`;
+                document.getElementById("currentWeatherCard").innerHTML = `<div class="text-danger">${errorMessage}</div>`;
+                document.querySelector(".micro-details-grid").innerHTML = `<div class="alert alert-danger">${errorMessage}</div>`;
+                document.getElementById("hourlyForecastList").innerHTML = `<div class="alert alert-danger">${errorMessage}</div>`;
+                document.getElementById("dailyForecastList").innerHTML = `<div class="alert alert-danger">${errorMessage}</div>`;
+            }
+        }
+
+        function populateCurrentWeather(current) {
+            setElementTextContent("currentTemp", `${Math.round(current.temperature)}°C`);
+            const currentIconElem = document.getElementById("currentIcon");
+            if (currentIconElem) currentIconElem.className = `${current.weather_icon} current-weather-icon`;
+            setElementTextContent("currentCondition", current.weather_description);
+            setElementTextContent("currentFeelsLike", `${Math.round(current.apparent_temperature)}°C`);
+            setElementTextContent("currentDescriptionText", `O tempo agora está ${current.weather_description.toLowerCase()}, com sensação térmica de ${Math.round(current.apparent_temperature)}°C.`);
+
+            // Micro-detalhes
+            setElementTextContent("detailAirQuality", formatAqiBadge(current.us_aqi));
+            setElementTextContent("detailWind", `${Math.round(current.wind_speed)} km/h`);
+            setElementTextContent("detailWindGusts", current.wind_gusts_10m_max !== undefined ? `${Math.round(current.wind_gusts_10m_max)} km/h` : "-- km/h");
+            setElementTextContent("detailHumidity", `${current.relative_humidity}%`);
+            setElementTextContent("detailPrecipitation", current.precipitation !== undefined ? `${current.precipitation.toFixed(1)} mm` : "-- mm");
+            setElementTextContent("detailPrecipitationSum", current.precipitation_sum !== undefined ? `${current.precipitation_sum.toFixed(1)} mm` : "-- mm");
+            setElementTextContent("detailVisibility", current.visibility !== undefined ? `${(current.visibility / 1000).toFixed(0)} km` : "-- km");
+            setElementTextContent("detailPressure", `${Math.round(current.surface_pressure)} hPa`);
+            setElementTextContent("detailUvIndex", formatUvIndexBadge(current.uv_index_max));
+            setElementTextContent("detailSunrise", current.sunrise || "--:--");
+            setElementTextContent("detailSunset", current.sunset || "--:--");
+        }
+
+        function setElementTextContent(id, value) {
+            const elem = document.getElementById(id);
+            if (elem) {
+                elem.innerHTML = value; // Alterado para innerHTML para suportar badges
+            }
+        }
+
+        function formatAqiBadge(aqi) {
+            if (aqi === null || aqi === undefined) return "<span class=\"badge bg-secondary\">N/A</span>";
+            let className = "bg-secondary";
+            let text = "";
+            if (aqi < 50) { className = "bg-success"; text = "Excelente"; }
+            else if (aqi >= 51 && aqi <= 100) { className = "bg-warning text-dark"; text = "Moderado"; }
+            else { className = "bg-danger"; text = "Alerta"; }
+            return `<span class="badge ${className}">AQI ${aqi} (${text})</span>`;
+        }
+
+        function formatUvIndexBadge(uvIndex) {
+            if (uvIndex === null || uvIndex === undefined) return "<span class=\"badge bg-secondary\">N/A</span>";
+            let className = "bg-secondary";
+            let text = "";
+            if (uvIndex < 3) { className = "bg-success"; text = "Baixo"; }
+            else if (uvIndex >= 3 && uvIndex <= 5) { className = "bg-warning text-dark"; text = "Moderado"; }
+            else if (uvIndex >= 6 && uvIndex <= 7) { className = "bg-orange"; text = "Alto"; } // Adicionei uma classe bg-orange para UV 6-7
+            else { className = "bg-danger"; text = "Muito Alto"; }
+            return `<span class="badge ${className}">UV ${uvIndex} (${text})</span>`;
+        }
+
+        // Adicionar estilo para a classe bg-orange no CSS (se ainda não existir)
+        const styleTag = document.querySelector('style');
+        if (styleTag && !styleTag.innerHTML.includes('.bg-orange')) {
+            styleTag.innerHTML += `\n.bg-orange { background-color: #fd7e14 !important; color: #fff; }`;
+        }
+        
+        function populateHourlyForecast(hourlyData) {
+            const hourlyList = document.getElementById("hourlyForecastList");
+            if (!hourlyList) return; // Adicionado null check
+
+            hourlyList.innerHTML = "";
+            if (hourlyData && hourlyData.time && hourlyData.temperature_2m && hourlyData.weather_code) {
+                const now = new Date();
+                let count = 0;
+                for (let i = 0; i < hourlyData.time.length && count < 8; i++) { // Limitar a 8 horas
+                    const hourTime = new Date(hourlyData.time[i]);
+                    if (hourTime >= now || (hourTime.getHours() === now.getHours() && hourTime.getDate() === now.getDate())) { // Incluir a hora atual ou futuras
+                        const hourlyCard = document.createElement("div");
+                        hourlyCard.className = "hourly-card";
+                        const weatherInfo = getWeatherDisplayInfo(hourlyData.weather_code[i]);
+                        hourlyCard.innerHTML = `
+                            <div class="hourly-time">${hourTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                            <i class="${weatherInfo.icon} hourly-icon"></i>
+                            <div class="hourly-temp">${Math.round(hourlyData.temperature_2m[i])}°C</div>
+                        `;
+                        hourlyList.appendChild(hourlyCard);
+                        count++;
+                    }
+                }
+                if (count === 0) {
+                    hourlyList.innerHTML = `<div class="alert alert-info">Dados de previsão por hora não disponíveis para as próximas horas.</div>`;
+                }
+            } else {
+                hourlyList.innerHTML = `<div class="alert alert-info">Dados de previsão por hora não disponíveis.</div>`;
+            }
+        }
+
+        function updateMainCardBackground(weatherCode) {
+            const card = document.getElementById("currentWeatherCard");
+            if (!card) return;
+
+            const textElements = card.querySelectorAll(".current-temp-main, .current-condition, .current-feels-like, .current-description-text");
+
+            // Códigos para Trovoada ou Chuva Forte
+            const stormyRainCodes = [95, 96, 99, 65, 67, 82]; // Adicionei 65 (Chuva Forte), 67 (Chuva Congelante Forte), 82 (Pancadas de Chuva Violentas)
+
+            // Códigos para Céu Limpo ou Parcialmente Nublado
+            const clearPartlyCloudyCodes = [0, 1, 2];
+
+            if (stormyRainCodes.includes(weatherCode)) {
+                card.style.background = 'linear-gradient(135deg, #3a7bd5, #3a6073)';
+                textElements.forEach(el => el.style.color = '#ffffff');
+            } else if (clearPartlyCloudyCodes.includes(weatherCode)) {
+                card.style.background = 'linear-gradient(135deg, #2193b0, #6dd5ed)';
+                textElements.forEach(el => el.style.color = '#ffffff');
+            } else {
+                // Fundo padrão e cor de texto padrão se não corresponder a nenhuma condição
+                card.style.background = '#ffffff';
+                textElements.forEach(el => el.style.color = '#333'); // Ou a cor padrão desejada
+            }
+        }
+
+        function populateDailyForecast(dailyData) {
+            const dailyList = document.getElementById("dailyForecastList");
+            if (!dailyList) return; // Adicionado null check
+
+            dailyList.innerHTML = "";
+            if (dailyData && dailyData.time && dailyData.temperature_2m_max && dailyData.temperature_2m_min && dailyData.weather_code) {
+                for (let i = 0; i < dailyData.time.length; i++) {
+                    const dayStr = dailyData.time[i]; // Formato "YYYY-MM-DD"
+                    const dayDate = new Date(dayStr + "T12:00:00"); 
+                    const dayName = i === 0 ? "Hoje" : dayDate.toLocaleDateString("pt-BR", { weekday: "short" });
+                    const dailyCard = document.createElement("div");
+                    dailyCard.className = "daily-card";
+                    
+                    let weatherInfo = getWeatherDisplayInfo(dailyData.weather_code[i]);
+                    
+                    dailyCard.innerHTML = `
+                        <div class="daily-name">${dayName}</div>
+                        <i class="${weatherInfo.icon} daily-icon"></i>
+                        <div class="daily-temps">
+                            <span class="daily-temp-max">${Math.round(dailyData.temperature_2m_max[i])}°C</span>
+                            <span class="daily-temp-min">${Math.round(dailyData.temperature_2m_min[i])}°C</span>
+                        </div>
+                    `;
+                    dailyList.appendChild(dailyCard);
+                }
+            } else {
+                dailyList.innerHTML = `<div class="alert alert-info">Dados de previsão diária não disponíveis.</div>`;
+            }
+        }
+
+        // ==================== MAPA E GEOLOCALIZAÇÃO ====================
+        let map = null; // Declarar map fora para ser acessível globalmente
+        let userMarker = null;
+        let municipioLayer = null; // Camada do polígono do município selecionado
+
+        function initializeMap() {
+            try {
+                map = L.map("map").setView([-14.6, -57.4], 6); // Coordenadas padrão de MT, zoom 6
+
+                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                    attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+                    maxZoom: 19,
+                }).addTo(map);
+            }
+            catch (error) {
+                console.error("Erro ao inicializar o mapa Leaflet:", error);
+                const mapElement = document.getElementById("map");
+                if (mapElement) {
+                    mapElement.innerHTML = `<div class="alert alert-danger">Erro ao carregar o mapa: ${error.message}</div>`;
+                }
+            }
+        }
+
+        function setupGeolocationAndWeather() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+
+                        loadWeatherData(lat, lon); // Carrega dados climáticos
+
+                        // Atualiza o mapa com a localização do usuário
+                        if (map) {
+                            map.setView([lat, lon], 12); // Zoom maior para a localização do usuário
+                            if (userMarker) {
+                                map.removeLayer(userMarker);
+                            }
+                            userMarker = L.marker([lat, lon]).addTo(map)
+                                .bindPopup("Você está aqui!").openPopup();
+
+                            // Força o redesenho do mapa após as mudanças de layout
+                             setTimeout(() => { map.invalidateSize(); }, 200);
+                        }
+                    },
+                    (error) => {
+                        // Força o redesenho do mapa após o carregamento inicial ou erro de geolocalização
+                        setTimeout(() => { map.invalidateSize(); }, 200); 
+                        console.error("Erro ao obter localização: ", error);
+                        loadWeatherData(); // Carrega com localização padrão em caso de erro
+                        if (map) {
+                            map.setView([-14.6, -57.4], 6); // Volta para a localização padrão de MT se a geolocalização falhar
+                            setTimeout(() => { map.invalidateSize(); }, 200);
+                        }
+                    }
+                );
+            } else {
+                console.error("Geolocalização não é suportada por este navegador.");
+                loadWeatherData(); // Carrega com localização padrão
+                if (map) {
+                    map.setView([-14.6, -57.4], 6); // Define o mapa para uma localização padrão se a geolocalização não for suportada
+                    setTimeout(() => { map.invalidateSize(); }, 200);
+                }
+            }
+        }
+
+        // ==================== SELETOR DE LOCALIDADE (ESTADO / CIDADE) ====================
+        // Os dropdowns são preenchidos 100% pela API (/api/estados/ e
+        // /api/municipios/), que por sua vez lê a tabela maps.Municipio —
+        // nenhum município fica fixo em código aqui. As duas constantes
+        // abaixo são só a pré-seleção inicial da UX (Home já abre com um
+        // município pronto para quem está avaliando o projeto do
+        // mestrado); qualquer outro estado/cidade continua escolhível
+        // normalmente. Ver docs/DECISOES.md.
+        const DEFAULT_UF = "MT";
+        const DEFAULT_MUNICIPIO_CODIGO_IBGE = "5107958"; // Tangará da Serra
+
+        async function populateEstados() {
+            const select = document.getElementById("estadoSelect");
+            if (!select) return;
+            try {
+                const response = await fetch("/api/estados/");
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const estados = await response.json();
+
+                select.innerHTML = "";
+                estados.forEach((estado) => {
+                    const option = document.createElement("option");
+                    option.value = estado.sigla;
+                    option.textContent = `${estado.nome} (${estado.sigla})`;
+                    select.appendChild(option);
+                });
+
+                select.value = DEFAULT_UF;
+                // Preenche a cidade com o valor padrão, mas SEM aplicar no
+                // mapa/clima — só o "change" manual do usuário faz isso.
+                await populateMunicipios(select.value, DEFAULT_MUNICIPIO_CODIGO_IBGE);
+            } catch (error) {
+                console.error("Erro ao carregar lista de estados:", error);
+            }
+        }
+
+        async function populateMunicipios(uf, autoSelectCodigoIbge) {
+            const select = document.getElementById("cidadeSelect");
+            if (!select || !uf) return;
+            try {
+                const response = await fetch(`/api/municipios/?uf=${encodeURIComponent(uf)}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const municipios = await response.json();
+
+                // A API já ordena com destaque primeiro; aqui só separamos
+                // visualmente em dois grupos no <select>.
+                const destaques = municipios.filter((m) => m.destaque);
+                const outros = municipios.filter((m) => !m.destaque);
+
+                select.innerHTML = "";
+
+                if (destaques.length > 0) {
+                    const grupoDestaques = document.createElement("optgroup");
+                    grupoDestaques.label = "Destaques";
+                    destaques.forEach((m) => grupoDestaques.appendChild(criarOptionMunicipio(m)));
+                    select.appendChild(grupoDestaques);
+                }
+
+                const grupoTodos = document.createElement("optgroup");
+                grupoTodos.label = "Todos os municípios";
+                outros.forEach((m) => grupoTodos.appendChild(criarOptionMunicipio(m)));
+                select.appendChild(grupoTodos);
+
+                if (autoSelectCodigoIbge) {
+                    const alvo = municipios.find((m) => m.codigo_ibge === autoSelectCodigoIbge);
+                    if (alvo) select.value = String(alvo.id);
+                }
+            } catch (error) {
+                console.error("Erro ao carregar municípios da UF", uf, error);
+            }
+        }
+
+        function criarOptionMunicipio(municipio) {
+            const option = document.createElement("option");
+            option.value = municipio.id;
+            option.textContent = municipio.destaque ? `⭐ ${municipio.nome}` : municipio.nome;
+            return option;
+        }
+
+        async function aplicarSelecaoMunicipio(municipioId) {
+            if (!municipioId) return;
+            try {
+                const response = await fetch(`/api/municipios/${municipioId}/geojson/`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const feature = await response.json();
+
+                if (map) {
+                    if (municipioLayer) {
+                        map.removeLayer(municipioLayer);
+                    }
+                    municipioLayer = L.geoJSON(feature, {
+                        style: { color: "#28a745", weight: 2, fillOpacity: 0.08 },
+                    }).addTo(map);
+                    map.fitBounds(municipioLayer.getBounds());
+
+                    // A escolha manual de cidade substitui o marcador de
+                    // geolocalização pelo contorno do município.
+                    if (userMarker) {
+                        map.removeLayer(userMarker);
+                        userMarker = null;
+                    }
+                    setTimeout(() => { map.invalidateSize(); }, 200);
+                }
+
+                const { lat, lon } = feature.properties.centroide;
+                loadWeatherData(lat, lon);
+
+                const hint = document.getElementById("localitySelectorHint");
+                if (hint) {
+                    hint.textContent = `Exibindo clima e contorno de ${feature.properties.nome}/${feature.properties.uf}.`;
+                }
+            } catch (error) {
+                console.error("Erro ao carregar o município selecionado:", error);
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function() {
+            initializeMap();
+            // Comportamento inicial: geolocalização do usuário (como já era).
+            // Os dropdowns só assumem o controle do mapa/clima quando o
+            // usuário escolhe uma cidade manualmente (evento "change").
+            setupGeolocationAndWeather();
+
+            const estadoSelect = document.getElementById("estadoSelect");
+            const cidadeSelect = document.getElementById("cidadeSelect");
+
+            if (estadoSelect) {
+                estadoSelect.addEventListener("change", function() {
+                    // Trocar o estado só repopula as cidades; não mexe no
+                    // mapa/clima sozinho — só "escolher a cidade" faz isso.
+                    populateMunicipios(this.value, null);
+                });
+            }
+            if (cidadeSelect) {
+                cidadeSelect.addEventListener("change", function() {
+                    aplicarSelecaoMunicipio(this.value);
+                });
+            }
+
+            populateEstados();
+        });
+    </script>
+
+    <footer class="text-center text-white py-3 mt-5" style="background-color: #1a1a1a; font-size: 0.9rem;">
+        <p class="m-0">© 2026 GeoClima MT - Sistema de Inteligência Geográfica e Monitoramento Climático.</p>
+        <p class="m-0 text-muted small" style="font-size: 0.75rem;">Dados fornecidos por Open-Meteo e RainViewer.</p>
+    </footer>
+</body>
+</html>

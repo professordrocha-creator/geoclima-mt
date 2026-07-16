@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Painel — GeoClima MT{% endblock %}
+{% block content %}
+<div class="card-auth text-center" style="max-width: 520px;">
+    <h1><i class="fas fa-user-circle"></i> Olá, {{ user.first_name|default:user.username }}!</h1>
+    <p class="text-muted">
+        Você está logado como <strong>{{ user.username }}</strong>
+        ({{ user.email|default:"sem e-mail cadastrado" }}).
+    </p>
+    <p>
+        <span class="badge bg-primary" style="font-size: 0.9rem;">
+            Perfil: {{ profile.get_profile_type_display }}
+        </span>
+    </p>
+    <hr>
+    <p class="text-muted small">
+        Esta é a área privada do GeoClima MT. O dashboard completo (chuva,
+        SPI, gráficos, fazendas, comparação CHIRPS × dados locais) chega
+        nas próximas etapas do projeto — por enquanto, isto é só a
+        confirmação de que o seu login funciona.
+    </p>
+</div>
+{% endblock %}
