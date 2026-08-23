@@ -69,14 +69,18 @@ Todos os 10 apps pedidos nos requisitos foram criados e estão registrados em
     visibilidade, pressão, índice UV, nascer/pôr do sol, AQI);
   - previsão por hora (próximas 8h) e previsão de 7 dias;
   - mapa Leaflet + tiles OpenStreetMap com geolocalização do usuário;
-  - 4 cards "Mapas Agrícolas do Brasil" — **links `#` sem função real**
-    (Satélite, Queimadas, Chuva Acumulada/CHIRPS, Temperatura);
   - iframe do Windy.com embutido para radar/satélite em tempo real;
   - botão que aponta para `/accounts/login/` quando deslogado, ou
     `/painel/` ("Meu Painel") quando já logado (atualizado em
     2026-07-16 — Etapa 4; antes apontava para `/admin/login/`).
 - `core/weather_service.py` existe mas está **vazio**.
 - `core/models.py` vazio (só comentário).
+- **Removido em 2026-08-23:** os 4 cards "Mapas Agrícolas do Brasil"
+  (Satélite, Queimadas, Chuva Acumulada/CHIRPS, Temperatura) — eram
+  `<a href="#">` sem função real desde sempre (nunca vieram
+  funcionais). Removido o bloco HTML e o CSS específico
+  (`.agricultural-map-card` e classes filhas) a pedido do usuário, em
+  vez de manter um placeholder inacabado na Home pública.
 - **`core/templates/core/ajuda.html`** (novo, 2026-08-23 — Etapa 12,
   fora do escopo original do PDF, pedido do usuário): manual de uso do
   sistema, público (`GET /ajuda/`, sem `@login_required` — ajuda quem

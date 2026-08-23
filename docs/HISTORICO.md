@@ -3,6 +3,53 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-08-23 (continuação 19) — Rodapé simplificado
+
+**Contexto:** pedido do usuário. O rodapé em `templates/base.html`
+(área logada) e `core/templates/core/index.html` (Home pública) tinha
+o texto "© 2026 GeoClima MT - Sistema de Inteligência Geográfica e
+Monitoramento Climático." em ambos.
+
+**O que foi feito:** removida a segunda parte da frase nos dois
+templates — rodapé passa a mostrar só "© 2026 GeoClima MT". Na Home, a
+segunda linha do rodapé ("Dados fornecidos por Open-Meteo e
+RainViewer.") não foi tocada.
+
+**Testado no navegador via Playwright** em ambos os templates
+(`/` e `/ajuda/`, que usa `base.html`): rodapé confirmado com o texto
+novo nos dois.
+
+---
+
+## 2026-08-23 (continuação 18) — Removidos os cards "Mapas Agrícolas do Brasil" da Home
+
+**Contexto:** pedido do usuário ao ver print da Home — os 4 cards
+"Mapas Agrícolas do Brasil" (Satélite, Previsão de Queimadas, Chuva
+Acumulada/CHIRPS, Temperatura) eram `<a href="#">` sem função real
+desde a implementação original da Home (nunca chegaram a ser
+conectados a nada), já documentados como pendência em
+`docs/ARQUITETURA.md`/`docs/ROADMAP.md`.
+
+**O que foi feito:** removido o bloco `<!-- BLOCO: MAPAS AGRÍCOLAS DO
+BRASIL -->` inteiro de `core/templates/core/index.html` (título "Mapas
+Agrícolas do Brasil", link "Mais mapas", os 4 cards), e o CSS
+específico que só esse bloco usava (`.agricultural-map-card` e as
+classes filhas `.card-icon`/`.card-title`/`.card-description`/
+`.btn-access`/`.badge-info`) — sem deixar CSS morto no arquivo.
+
+**Testado no navegador via Playwright:** seção confirmada ausente do
+HTML renderizado, seção de radar (Windy) logo abaixo continua
+presente e intacta, nenhum erro de console novo (o único erro
+observado é o CORS pré-existente do iframe do Windy, sem relação com
+esta mudança).
+
+**Atualizado:** `docs/ARQUITETURA.md` (remoção documentada na seção
+`core`), `docs/ROADMAP.md` (item 2.4 atualizado — os cards foram
+removidos, não ficaram pendentes), `docs/RELATORIO_TECNICO.md`
+(2 menções corrigidas pra refletir a remoção).
+
+---
+
 ## 2026-08-23 (continuação 17) — `moderadamente_umido` adicionado a `SpiResult.CLASSIFICATIONS`
 
 **Contexto:** fecha a pendência registrada na entrada anterior. A

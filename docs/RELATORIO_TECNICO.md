@@ -277,8 +277,9 @@ fechamento do roadmap original, fora do escopo de `docs/REQUISITOS.md`.
   seção 10.
 - **Pendente:** 2.3 (alternância de camadas climáticas no mapa) não
   implementada; 2.4 parcial (radar/satélite via iframe Windy
-  funcional; cards "Satélite/Queimadas/Chuva Acumulada/Temperatura"
-  são links `#` sem função real).
+  funcional; os 4 cards "Satélite/Queimadas/Chuva Acumulada/Temperatura",
+  que eram links `#` sem função real, foram removidos da Home em
+  2026-08-23).
 
 ### Etapa 3 — Integração CHIRPS ✅ completa (2026-07-16)
 
@@ -714,9 +715,10 @@ privado, Etapa 8.3). A Home contém: card de clima atual, grade de
 micro-detalhes (vento, rajada, umidade, chuva, visibilidade, pressão,
 índice UV, nascer/pôr do sol, AQI), previsão por hora (8h) e por 7
 dias, mapa Leaflet com geolocalização do usuário, e um iframe do
-Windy.com para radar/satélite em tempo real. Quatro cards "Mapas
-Agrícolas do Brasil" (Satélite, Queimadas, Chuva Acumulada/CHIRPS,
-Temperatura) permanecem como links `#` sem função real.
+Windy.com para radar/satélite em tempo real. Um bloco de 4 cards
+"Mapas Agrícolas do Brasil" (Satélite, Queimadas, Chuva
+Acumulada/CHIRPS, Temperatura), que eram links `#` sem função real,
+foi removido da Home em 2026-08-23, a pedido do usuário.
 
 ### 8.2 Mapa com Leaflet
 

@@ -49,59 +49,6 @@
         .daily-temp-max { font-weight: 600; color: #dc3545; }
         .daily-temp-min { font-weight: 600; color: #0d6efd; }
 
-        /* Novos estilos para a seção de Mapas Agrícolas */
-        .agricultural-map-card {
-            background-color: #ffffff;
-            border-radius: 1rem;
-            padding: 1.5rem;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.08);
-            text-align: center;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            height: 100%; /* Garante que o card ocupe a altura total da coluna */
-        }
-
-        .agricultural-map-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 12px 24px rgba(0,0,0,0.08);
-        }
-
-        .agricultural-map-card .card-icon {
-            font-size: 3rem;
-            color: #28a745; /* Verde para ícones agrícolas */
-            margin-bottom: 1rem;
-        }
-
-        .agricultural-map-card .card-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: #343a40;
-            margin-bottom: 0.5rem;
-        }
-
-        .agricultural-map-card .card-description {
-            font-size: 0.9rem;
-            color: #6c757d;
-            margin-bottom: 1rem;
-        }
-
-        .agricultural-map-card .btn-access {
-            background-color: #28a745; /* Verde Bootstrap */
-            border-color: #28a745;
-            color: #fff;
-            font-weight: 600;
-            padding: 0.5rem 1.5rem;
-            border-radius: 0.5rem;
-        }
-
-        .agricultural-map-card .badge-info {
-            background-color: #17a2b8; /* Bootstrap info blue */
-            color: #fff;
-            font-size: 0.75rem;
-            padding: 0.3em 0.6em;
-            border-radius: 0.25rem;
-            vertical-align: middle;
-            margin-left: 0.5rem;
-        }
     </style>
 </head>
 <body>
@@ -236,54 +183,6 @@
                     <h6 class="section-title">Previsão de 7 Dias</h6>
                     <div class="daily-list" id="dailyForecastList">
                         <!-- Previsão de dias será injetada aqui pelo JS -->
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- BLOCO: MAPAS AGRÍCOLAS DO BRASIL -->
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="d-flex justify-content-between align-items-center mt-4 mb-3">
-                    <h5 class="fw-bold m-0" style="color: #1a1a1a;">Mapas Agrícolas do Brasil</h5>
-                    <a href="#" class="text-success text-decoration-none fw-semibold small">Mais mapas</a>
-                </div>
-                <div class="row g-3">
-                    <!-- Card 1: Satélite -->
-                    <div class="col-12 col-sm-6 col-md-3">
-                        <div class="agricultural-map-card">
-                            <i class="fas fa-satellite-dish card-icon"></i>
-                            <div class="card-title">Satélite</div>
-                            <div class="card-description">Acesse mapa de satélite</div>
-                            <a href="#" class="btn btn-access btn-sm">Acessar</a>
-                        </div>
-                    </div>
-                    <!-- Card 2: Previsão de Queimadas -->
-                    <div class="col-12 col-sm-6 col-md-3">
-                        <div class="agricultural-map-card">
-                            <i class="fas fa-fire card-icon"></i>
-                            <div class="card-title">Previsão de Queimadas</div>
-                            <div class="card-description">Acesse mapa de queimadas</div>
-                            <a href="#" class="btn btn-access btn-sm">Acessar</a>
-                        </div>
-                    </div>
-                    <!-- Card 3: Chuva Acumulada -->
-                    <div class="col-12 col-sm-6 col-md-3">
-                        <div class="agricultural-map-card">
-                            <i class="fas fa-cloud-showers-heavy card-icon"></i>
-                            <div class="card-title">Chuva Acumulada <span class="badge badge-info">CHIRPS</span></div>
-                            <div class="card-description">Acesse mapa de chuva acumulada (CHIRPS)</div>
-                            <a href="#" class="btn btn-access btn-sm">Acessar</a>
-                        </div>
-                    </div>
-                    <!-- Card 4: Temperatura -->
-                    <div class="col-12 col-sm-6 col-md-3">
-                        <div class="agricultural-map-card">
-                            <i class="fas fa-thermometer-half card-icon"></i>
-                            <div class="card-title">Temperatura</div>
-                            <div class="card-description">Acesse mapa de temperatura</div>
-                            <a href="#" class="btn btn-access btn-sm">Acessar</a>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -764,7 +663,7 @@
     </script>
 
     <footer class="text-center text-white py-3 mt-5" style="background-color: #1a1a1a; font-size: 0.9rem;">
-        <p class="m-0">© 2026 GeoClima MT - Sistema de Inteligência Geográfica e Monitoramento Climático.</p>
+        <p class="m-0">© 2026 GeoClima MT</p>
         <p class="m-0 text-muted small" style="font-size: 0.75rem;">Dados fornecidos por Open-Meteo e RainViewer.</p>
     </footer>
 </body>

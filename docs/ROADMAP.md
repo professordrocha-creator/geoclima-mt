@@ -33,8 +33,11 @@
       `ativo=True`/`destaque=True` hoje.
 - [ ] 2.3 Alternância de camadas climáticas no mapa
 - [~] 2.4 Mapas meteorológicos — radar/satélite via iframe Windy **feito**;
-      cards "Satélite / Queimadas / Chuva Acumulada / Temperatura" são
-      **links `#` sem função**
+      os 4 cards "Satélite / Queimadas / Chuva Acumulada / Temperatura"
+      (que eram links `#` sem função) foram **removidos da Home em
+      2026-08-23**, a pedido do usuário, em vez de mantidos como
+      placeholder — este sub-item volta a ficar em aberto se algum dia
+      esses mapas forem implementados de verdade
 - [x] 2.5 App `maps` com model/admin/management command próprios (`views`
       do seletor ficaram no app `api`, não no `maps` — ver ARQUITETURA.md)
 
