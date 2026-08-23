@@ -3,6 +3,70 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-08-23 (continuação 20) — Cálculo automático de SPI ao cadastrar estação nova
+
+**Contexto:** pedido do usuário — hoje, uma fazenda/estação nova num
+município já com CHIRPS importado não tinha SPI calculado até alguém
+rodar `calcular_spi` manualmente, e o dashboard mostrava "Ainda não há
+SPI suficiente". Não escala pra demonstração com múltiplos usuários
+cadastrando fazendas.
+
+**Investigação feita antes de codar (pedido explícito do usuário,
+aprovada antes da implementação):**
+- Duas rotas criam `Station` hoje: `stations/views.py:criar_estacao`
+  (cadastro normal) e `farms/views.py:_criar_estacoes_do_shapefile`
+  (pontos de um Shapefile). Um signal cobre as duas sem duplicar
+  chamada em cada view.
+- `calcular_spi` faz duas coisas: `spi.services.calcular_serie_spi`
+  (cálculo puro, por município) + um loop de `update_or_create` por
+  estação. Medido nesta sessão: **~24-66s** pra recalcular um
+  município com histórico de 45 anos (tempo cresce com o número de
+  estações do município, não só a nova).
+- Não existia nenhum signal em `Station`/`Farm` — o único precedente
+  no projeto é `accounts/signals.py` (cria `Profile` ao criar `User`),
+  usado como modelo de implementação.
+
+**O que foi feito:**
+
+- **`stations/signals.py`** (novo): `post_save` em `Station`. Se
+  `created=True` e `estacao.farm.municipio.ativo` (mesmo sinal já
+  usado em todo o projeto pra "tem CHIRPS suficiente" — nenhum
+  critério novo inventado), despacha
+  `spi.tasks.calcular_spi_municipio.delay(codigo_ibge)`.
+- **`stations/apps.py`**: `ready()` importando `stations.signals`,
+  mesmo padrão de `accounts/apps.py`.
+- **`spi/tasks.py`** (novo): task Celery `calcular_spi_municipio` —
+  **não** reimplementa nada, só chama
+  `call_command("calcular_spi", municipio=codigo_ibge)`, mesmo padrão
+  já usado por `climate/tasks.py:atualizar_chirps` com `import_chirps`.
+  Retry declarativo igual à task do CHIRPS.
+
+**Decisão registrada em DECISOES.md:** assíncrono via Celery, não
+síncrono na view — decisão com trade-off explícito, ver lá.
+
+**Nenhuma migration** — signal e task Celery não tocam model nenhum.
+
+**Testado (não simulado):**
+- Estação criada via `Station.objects.create()` (caminho do
+  Shapefile): task disparada, log do worker confirmado, SPI calculado
+  em ~66s (4 estações no município nesse momento), `serie_spi()` e
+  `gerar_insights()` passaram a devolver dado real pra fazenda de
+  teste sem rodar `calcular_spi` manualmente.
+- Estação criada num município `ativo=False` (Acrelândia/AC):
+  nenhuma task disparada, nenhum erro, cadastro seguiu normal — o
+  "não fazer nada" do requisito confirmado.
+- Cadastro via formulário real (Playwright, `/painel/estacoes/nova/`):
+  resposta HTTP em **719ms** — confirma que o cálculo (~1 minuto) não
+  trava o cadastro, roda em background.
+- Dados de teste removidos depois, filtrados por
+  `owner=joao.produtor`; as duas fazendas reais do `daniel` ("fazenda
+  Rocha" e "faz Taruma") conferidas intactas antes e depois.
+
+**Atualizado:** `docs/DECISOES.md` (raciocínio síncrono vs. Celery,
+por que signal e não chamada direta na view).
+
+---
+
 ## 2026-08-23 (continuação 19) — Rodapé simplificado
 
 **Contexto:** pedido do usuário. O rodapé em `templates/base.html`

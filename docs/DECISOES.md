@@ -1250,3 +1250,84 @@ alternativa ao Playwright quando não se tem a senha de uma conta real:
 - Estado de `joao.produtor` restaurado ao original ao final
   (`is_active=True`, `profile_type='produtor'`); fazenda real do
   `daniel` conferida intacta.
+
+## 2026-08-23 — Cálculo automático de SPI ao cadastrar estação nova
+
+**Contexto:** hoje uma fazenda/estação nova num município com CHIRPS
+já importado ficava sem SPI até alguém rodar `calcular_spi`
+manualmente — o dashboard mostrava "Ainda não há SPI suficiente".
+Pedido do usuário, com investigação exigida e aprovada antes de
+qualquer código (ver `docs/HISTORICO.md` pro resultado completo da
+investigação).
+
+**Decisão: signal `post_save` em `Station`, não chamada direta nas
+views.** Existem HOJE dois pontos de código que criam `Station`
+(`stations/views.py:criar_estacao` e
+`farms/views.py:_criar_estacoes_do_shapefile`). Colocar a chamada
+direto em cada view exigiria lembrar de tocar nos dois lugares agora
+e em qualquer ponto de criação futuro (ex.: uma importação em lote que
+alguém adicione depois). Um signal cobre `Station.save()`
+independente de quem chamou — é o único ponto de verdade "uma estação
+nova entrou no sistema", igual o padrão já usado em
+`accounts/signals.py` (Profile criado ao criar User).
+
+**Decisão: assíncrono via Celery, não síncrono na view — com medição
+real, não estimativa.** Rodei `calcular_spi` de verdade nesta sessão:
+**~24 a 66 segundos** para recalcular um município com histórico de
+45 anos, dependendo de quantas estações já existem nele (o tempo
+cresce com o total de estações do município, não só a nova, porque
+`calcular_spi --municipio X` recalcula todas de uma vez). Colocar isso
+dentro do request-response do cadastro travaria a página por até mais
+de um minuto — inaceitável, e pior ainda no cenário que motivou o
+pedido (vários usuários cadastrando ao mesmo tempo numa demonstração,
+todos competindo pelo mesmo worker Django síncrono). `celery_worker`
+já é serviço obrigatório do `docker-compose.yml` desde a Etapa 3.3 —
+não é infraestrutura nova, só mais uma task nele.
+
+**Trade-off registrado explicitamente (era requisito do pedido):**
+
+| | Síncrono | Assíncrono (escolhido) |
+|---|---|---|
+| Cadastro do usuário | Trava 24-66s | Responde na hora (medido: 719ms via Playwright) |
+| SPI/Insight disponível | Imediato, mesma página | Alguns segundos/minuto depois — usuário pode precisar recarregar o dashboard |
+| Risco sob carga | Alto (timeout de request em cenário de demo com vários usuários) | Nenhum pro cadastro em si |
+| Infra | Nenhuma nova | Nenhuma nova (`celery_worker` já obrigatório) |
+
+**Decisão: task nova (`spi/tasks.py:calcular_spi_municipio`) só chama
+o management command via `call_command`, não reimplementa nada.**
+Mesmo padrão já usado por `climate/tasks.py:atualizar_chirps` com
+`import_chirps` — a task decide QUANDO disparar, o command continua
+sendo o único lugar com a lógica de cálculo/gravação. Recalcula pra
+TODAS as estações do município (não só a nova) — inofensivo, é
+`update_or_create` idempotente, e é exatamente o que `calcular_spi
+--municipio X` já faz manualmente hoje.
+
+**Decisão: `municipio.ativo` como critério de disparo, não uma
+checagem nova.** É o mesmo sinal já usado em todo o projeto pra "este
+município tem CHIRPS suficiente" (SPI, validação, correção, tendência,
+cenários todos usam esse critério) — inventar um segundo critério
+(ex.: checar `calcular_serie_spi` primeiro) duplicaria uma decisão que
+já existe. Se `ativo=True` mas o histórico ainda for curto demais pra
+alguma escala, a própria `calcular_serie_spi` já lida com isso (devolve
+`[]`), sem erro — mesmo comportamento de rodar o comando manualmente.
+
+**Nenhuma migration** — nem o signal nem a task tocam em nenhum model.
+
+**Testado com dado real de execução (não simulado):**
+- Estação criada (via `Station.objects.create()`, simulando o caminho
+  do Shapefile): task recebida pelo worker (log confirmado), SPI
+  calculado em produção real (~66s pra 4 estações no município nesse
+  momento), `dashboard.services.serie_spi()` e
+  `dashboard.insights.gerar_insights()` passaram a devolver dado
+  correto pra fazenda de teste sem nenhum `calcular_spi` manual.
+- Estação criada num município `ativo=False` (Acrelândia/AC): zero
+  task disparada (log do worker conferido vazio), zero erro, cadastro
+  seguiu normal — confirma o requisito "não fazer nada" literalmente,
+  não só por inspeção de código.
+- Cadastro via formulário real no navegador (Playwright,
+  `/painel/estacoes/nova/`): resposta HTTP em **719ms**, mensagem de
+  sucesso na tela — confirma que o cálculo de ~1 minuto roda
+  inteiramente em background, sem travar o usuário.
+- Dados de teste removidos depois, filtrados por
+  `owner=joao.produtor`; as duas fazendas reais do `daniel`
+  ("fazenda Rocha" e "faz Taruma") conferidas intactas antes e depois.
