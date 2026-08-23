@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Confirmar exclusão — GeoClima MT{% endblock %}
+{% block content %}
+<div class="card-auth text-center">
+    <h1><i class="fas fa-triangle-exclamation text-danger"></i> Confirmar Exclusão</h1>
+    <p>
+        Tem certeza que deseja excluir {{ tipo }} <strong>"{{ objeto.name }}"</strong>?
+        {% if tipo == "fazenda" %}
+            <br><span class="text-danger small">Todos os talhões e estações desta fazenda também serão excluídos.</span>
+        {% endif %}
+    </p>
+    <form method="post">
+        {% csrf_token %}
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-danger flex-fill">Sim, excluir</button>
+            <a href="javascript:history.back()" class="btn btn-outline-secondary flex-fill">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

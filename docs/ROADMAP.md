@@ -1,10 +1,11 @@
 # Roadmap — GeoClima MT
 
 > Checklist das 10 etapas definidas em [REQUISITOS.md](REQUISITOS.md).
-> `[x]` = confirmado no código nesta revisão (2026-07-16).
+> `[x]` = confirmado no código (data ao lado de cada item/seção).
 > `[~]` = parcial (existe algo, mas incompleto — detalhe abaixo do item).
 > `[ ]` = não iniciado (nenhuma evidência encontrada no código).
 > Detalhes técnicos de cada item em [ARQUITETURA.md](ARQUITETURA.md).
+> Última sessão de trabalho: 2026-08-23 (Etapa 5).
 
 ## Etapa 1 — Estrutura base (Docker, Django, PostgreSQL, PostGIS)
 
@@ -111,69 +112,353 @@
       implementada — aceitável para dev/beta fechado, precisa ser
       resolvida antes de beta público. Ver DECISOES.md.
 
-## Etapa 5 — Fazendas e estações
+## Etapa 5 — Fazendas e estações ✅ COMPLETA (2026-08-23)
 
-- [~] Schema `Farm` definido (nome, município, lat/lon, área, cultura,
-      observações, `geom` PostGIS, `owner`)
-- [~] Schema `Station` definido (tipos: Davis, Ecowitt, Ambient, IoT, manual,
+- [x] Schema `Farm` (2026-08-23 — `city` texto livre trocado por FK
+      `municipio` → `maps.Municipio`; `city` continua na tabela por
+      compatibilidade, sem uso no formulário. Ver [DECISOES.md](DECISOES.md))
+- [x] Schema `Station` definido (tipos: Davis, Ecowitt, Ambient, IoT, manual,
       CSV; `geom` PostGIS, FKs `farm`/`owner`)
-- [x] Migração aplicada ao banco (2026-07-16 — tabelas `farms_farm` e
-      `stations_station`, campos `geom` POINT/SRID 4326 confirmados)
-- [ ] Views/forms de cadastro de fazenda
-- [ ] Views/forms de cadastro de talhão (não há model de talhão ainda)
-- [ ] Views/forms de cadastro de estação
-- [ ] Visualização de fazendas no mapa
+- [x] Model novo `Talhao` (2026-08-23 — não existia antes; `farms/models.py`,
+      ponto georreferenciado, FKs `farm`/`owner`)
+- [x] Migração aplicada ao banco (`farms.0002` — FK `municipio`, model
+      `Talhao`)
+- [x] Views/forms de cadastro de fazenda (`farms/views.py`,
+      `farms/forms.py`) — nome, Estado→Cidade (reaproveita o seletor da
+      Home), área, cultura, observações; localização marcada clicando/
+      arrastando um marcador no mapa Leaflet (sem digitar lat/lon à mão)
+- [x] Views/forms de cadastro de talhão — mesmo padrão de mapa, dentro da
+      página de detalhe da fazenda
+- [x] Views/forms de cadastro de estação (`stations/views.py`,
+      `stations/forms.py`) — `<select>` de fazenda restrito às fazendas
+      do próprio usuário; mapa recentraliza ao trocar a fazenda escolhida
+- [x] Visualização de fazendas no mapa — lista "Minhas Fazendas" com mapa
+      Leaflet de todas as fazendas do usuário; detalhe da fazenda com
+      mapa da sede + talhões
+- [x] CRUD completo (criar/editar/excluir) para fazenda, talhão e
+      estação, com tela de confirmação antes de excluir. Excluir fazenda
+      cascateia talhões e estações (aviso explícito na confirmação)
+- [x] Isolamento multiusuário testado no navegador com dois usuários
+      diferentes: lista vazia para quem não tem fazenda, acesso direto
+      por URL a fazenda de outro usuário retorna 404
+- [x] `admin.py` em `farms` e `stations` (inlines, autocomplete,
+      busca/filtro)
+- [x] Importação de Shapefile no cadastro de fazenda (2026-08-23) —
+      upload opcional de `.zip` (.shp/.shx/.dbf/.prj), convive com o
+      clique manual no mapa. Polígono(s) do arquivo viram
+      `Farm.poligono` (novo campo `MultiPolygonField`, une múltiplas
+      feições); pontos viram `Station` automaticamente (nome lido do
+      shapefile quando existe coluna de atributo tipo `nome`). Contorno
+      mostrado no detalhe da fazenda e como camada de referência no
+      cadastro de estação (`farms:poligono_fazenda_json`). Testado com
+      shapefile real (1 polígono + 2 pontos nomeados via `ogr2ogr`).
+      Ver [DECISOES.md](DECISOES.md).
+- [~] Campo `crop` (cultura agrícola) continua um único texto por
+      fazenda/talhão — avaliado e **deliberadamente não expandido**
+      para um calendário de sucessão de safra/safrinha nesta etapa; fica
+      pra quando a Etapa 9 (insights) definir o que realmente precisa.
+      Ver [DECISOES.md](DECISOES.md).
 
-## Etapa 6 — Importação CSV e dados manuais
+## Etapa 6 — Importação CSV e dados manuais ✅ COMPLETA (2026-08-23)
 
-- [~] Campo `source_type` em `RainfallData` já contempla `manual` e
+- [x] Campo `source_type` em `RainfallData` já contemplava `manual` e
       `imported_csv`
-- [x] Migração aplicada ao banco (2026-07-16 — tabela `climate_rainfalldata`)
-- [ ] Formulário de lançamento manual de chuva
-- [ ] Importador de CSV
-- [ ] Importador de Excel
+- [x] Migração aplicada ao banco (2026-07-16 — tabela `climate_rainfalldata`;
+      2026-08-23 — `climate.0003` acrescentou `time`/`notes`, pedidos pelo
+      PDF e ausentes até então)
+- [x] Formulário de lançamento manual de chuva (`climate/views.py`,
+      `climate/forms.py` — primeiros do app `climate`, que só tinha
+      model/tasks/command até aqui): estação (só as do usuário), data,
+      horário opcional, mm, observações. Idempotente (`update_or_create`
+      por estação+data+origem — relançar o mesmo dia atualiza, não duplica)
+- [x] Importador de CSV e **Excel juntos** (`climate/data_import.py`,
+      dependência nova `openpyxl`) — mesmo parser pros dois formatos,
+      detecta colunas pelo nome do cabeçalho (aceita variações comuns em
+      português/inglês), não exige template rígido de planilha
+- [x] Histórico de lançamentos com editar/excluir, mesmo padrão de
+      fazenda/talhão/estação
+- [x] `climate/admin.py` novo (`RainfallData`, `ChirpsData`, `Projection`)
+- [x] Isolamento multiusuário: `station` restrito às estações do usuário
+      logado em todos os formulários
+- Testado com CSV e Excel reais (datas em dois formatos diferentes,
+      horário/observações opcionais, reimportação idempotente) — ver
+      relatório completo em [HISTORICO.md](HISTORICO.md). Uma armadilha de
+      formulário (`<input type="date">` vazio ao editar, por causa da
+      localização pt-br) encontrada e corrigida — ver
+      [DECISOES.md](DECISOES.md).
 
-## Etapa 7 — Cálculo SPI
+## Etapa 7 — Cálculo SPI (completa — 7.1, 7.2, 7.3, 7.4)
 
-- [~] Schema `SpiResult` definido (SPI-3/6/12, classificações de seca)
+- [x] Schema `SpiResult` definido (SPI-3/6/12, classificações de seca)
 - [x] Migração aplicada ao banco (2026-07-16 — tabela `spi_spiresult`)
-- [ ] Lógica de cálculo do SPI
-- [ ] Validação estatística CHIRPS × local (R², RMSE, MAE, MBE, índice d,
-      índice c)
-- [ ] Detecção de inconsistências (chuva negativa, extremos, duplicados,
-      falhas temporais)
-- [ ] Correção/calibração local do CHIRPS
+- [x] **7.1 Lógica de cálculo do SPI** (2026-08-23) — `spi/services.py`
+      (fórmula `SPI=(Xi-X̄)/σ` do PDF, agrupada por mês do calendário,
+      mínimo 10 anos de histórico por mês) + management command
+      `calcular_spi` (`--scale`/`--municipio`, idempotente via
+      `update_or_create`) + `spi/admin.py`. Fonte: só CHIRPS (única com
+      histórico longo o bastante) — **SPI só calculável hoje em
+      municípios `ativo=True`** (Tangará da Serra/Cáceres), mas o código
+      é genérico (`Municipio.objects.filter(ativo=True)`, nenhum nome de
+      cidade no código) e passa a funcionar em qualquer outro município
+      automaticamente assim que ele tiver `ativo=True` + backfill de
+      CHIRPS — zero código novo necessário. Cartão "SPI atual" adicionado
+      em `farms/detalhe_fazenda.html`. Testado com dado real do usuário
+      (3.246 registros, média dos z-scores ≈0, idempotência confirmada).
+      Ver [DECISOES.md](DECISOES.md) sobre limiares de classificação
+      (não vêm no PDF, usei os padrão McKee et al. 1993) e a decisão de
+      manter `station` obrigatório por enquanto (SPI duplicado por
+      estação em vez de mudar o schema).
+- [x] **7.2 Validação estatística CHIRPS × local** (2026-08-23) — model
+      novo `climate.ChirpsValidation` (1 resultado por estação, sempre o
+      mais recente — não é série temporal), `climate/validation.py`
+      (R², RMSE, MAE, MBE, índice d de Willmott, índice c de
+      Camargo-Sentelhas — as 6 métricas exatas do PDF) + command
+      `validar_chirps`. Compara dia a dia CHIRPS × dado local da
+      estação (mínimo 3 pares). Mesma restrição de dado do SPI (só
+      municípios `ativo=True` têm CHIRPS pra comparar). Cartão
+      "Validação CHIRPS × Dado Local" no detalhe da fazenda. Testado
+      com cenário sintético matematicamente controlado (transformação
+      linear conhecida) — R²=1,000 e sinal do MBE bateram exatamente
+      com o previsto. Ver [DECISOES.md](DECISOES.md) sobre as fórmulas
+      e limiares de classificação (não vêm todos no PDF).
+- [x] **7.3 Detecção de inconsistências** (2026-08-23) —
+      `climate/quality_checks.py` (4 checagens: chuva negativa, valor
+      extremo >200mm, valor repetido 3+ dias seguidos, gap de 5+ dias
+      sem lançamento) + command `detectar_inconsistencias`, gravando
+      via `alerts.Alert` (novo tipo `inconsistency`, reaproveita o
+      model da Etapa 9 em vez de criar um novo — o PDF já fala em
+      "alertas automáticos" nesta seção). Chuva negativa também
+      **bloqueada na entrada** do formulário de lançamento manual, não
+      só detectada depois. Idempotente (`get_or_create` por estação +
+      tipo + mensagem). Cartão de alertas no detalhe da fazenda.
+      Testado com cenário cobrindo as 4 checagens ao mesmo tempo — as 4
+      mensagens "Possível inconsistência detectada" (texto exato do
+      PDF) confirmadas. Ver [DECISOES.md](DECISOES.md) sobre os
+      limiares escolhidos e por que reaproveitar `alerts.Alert`.
+- [x] **7.4 Correção/calibração local do CHIRPS** (2026-08-23) —
+      `climate/correction.py`: correção aditiva de viés, reaproveitando
+      o MBE já calculado pela `ChirpsValidation` (Etapa 7.2) — sem
+      estatística nova, sem model novo, sem command novo. `valor_corrigido
+      = valor_chirps − mbe`, calculado on-the-fly (não persiste série
+      corrigida, mesmo espírito "sempre o estado atual" da
+      `ChirpsValidation`). Só disponível pra estação que já tenha
+      validação calculada. Cartão "CHIRPS Corrigido (Calibração Local)"
+      no detalhe da fazenda, últimos 10 dias, bruto × corrigido lado a
+      lado. Testado com cenário sintético (viés constante conhecido de
+      +10mm) — correção reproduziu o valor local original exatamente
+      nos 10 dias. Ver [DECISOES.md](DECISOES.md) sobre a fórmula e por
+      que a correção não realimenta o SPI (nível estação vs. nível
+      município).
 
-## Etapa 8 — Dashboards e gráficos
+## Etapa 8 — Dashboards e gráficos (completa — 8.1, 8.2, 8.3)
 
-- [~] App `dashboard` (2026-07-16) — não é mais um esqueleto vazio:
-      `views.py`/`urls.py`/template existem, mas só como placeholder de
-      login da Etapa 4 (`/painel/`, saudação + perfil). Nenhuma
-      funcionalidade de dashboard de verdade ainda.
-- [ ] Dashboard privado por usuário (chuva atual, acumulados, SPI,
-      tendências, comparação CHIRPS × local) — vai **estender** a mesma
-      view/template do `/painel/`, não criar uma rota nova (ver
-      DECISOES.md)
+- [x] **8.1 Estrutura do dashboard + chuva atual/acumulados + gráfico de
+      série** (2026-08-23) — `dashboard/services.py` (novo:
+      `chuva_atual`, `acumulados`, `serie_chuva`, tudo on-the-fly a
+      partir de `RainfallData`/`ChirpsData`, sem model novo). View
+      `painel` estendida (Etapa 4, mesma rota) com seletor de fazenda
+      (`?fazenda=<id>`). Cartões "Chuva Atual" e "Acumulados" (7/30/90
+      dias, local × CHIRPS separados). Gráfico de linha "Série de Chuva"
+      com **Chart.js via CDN** (primeira lib de gráfico do projeto).
+      Testado com fazenda real (só leitura) e fazenda sintética
+      temporária cobrindo dado local e fallback CHIRPS — gráfico
+      conferido com pixels de fato desenhados no canvas via Playwright.
+      Ver [DECISOES.md](DECISOES.md).
+- [x] **8.2 Tendência do SPI + comparação CHIRPS × local em gráfico**
+      (2026-08-23) — `dashboard/services.py`: `serie_spi(farm)` (uma
+      linha por data, colunas SPI-3/6/12, pra não desalinhar as
+      escalas por causa do início tardio do SPI-12) e
+      `comparacao_chirps_local(farm)` (reaproveita
+      `climate.validation.pares_chirps_local`, sem estatística nova).
+      Cartões "Tendência do SPI" (linha) e "Comparação CHIRPS × Dado
+      Local" (dispersão com linha de referência y=x) em
+      `dashboard/painel.html`, mesmo Chart.js da 8.1. Testado com
+      fazenda sintética (SPI de 545 meses, comparação com R²=1,000
+      conhecido) e com a fazenda real do usuário em modo leitura (119
+      meses de SPI, comparação vazia — sem `ChirpsValidation` calculada
+      ainda pras estações reais, tratado sem erro). Ver
+      [DECISOES.md](DECISOES.md).
+- [x] **8.3 Mapa geral de todas as fazendas do usuário + previsão
+      climática (Open-Meteo) no dashboard** (2026-08-23) — só
+      `dashboard/painel.html` mudou (sem agregação nova em
+      `services.py`). Mapa Leaflet com **todas** as fazendas do
+      usuário (fazenda selecionada destacada por tooltip), reaproveita
+      lat/lon já presentes no `fazendas` do contexto. Previsão
+      climática buscada **direto do navegador** na Open-Meteo (mesmo
+      padrão client-side da Home pública, Etapa 2), card compacto
+      (condição atual + 5 dias). Testado com 2 fazendas sintéticas em
+      municípios diferentes (mapa com 2 marcadores, `fitBounds`
+      correto) e chamada real à Open-Meteo (não mockada) retornando
+      previsão válida. Ver [DECISOES.md](DECISOES.md).
+
+**Etapa 8 (dashboard privado) está completa: 8.1, 8.2 e 8.3
+concluídas.**
 
 > A Home pública (Etapa 2) já tem cards de clima via Open-Meteo, mas isso
 > não é o dashboard privado multiusuário pedido nesta etapa.
 
-## Etapa 9 — Alertas e insights automáticos
+## Etapa 9 — Alertas e insights automáticos (completa — 9.1, 9.2)
 
-- [~] Schema `Alert` definido (seca, excesso de chuva, risco hídrico,
-      anomalia)
-- [x] Migração aplicada ao banco (2026-07-16 — tabela `alerts_alert`)
-- [ ] Lógica de detecção/geração automática de alertas
-- [ ] Geração de insights (risco de déficit hídrico, janela de plantio,
-      necessidade de irrigação etc.)
-- [ ] Notificações (email/WhatsApp) — marcado como "futuro" no PDF
+- [x] Schema `Alert` (seca, excesso de chuva, risco hídrico, anomalia,
+      **inconsistência** — este último tipo adicionado pela Etapa 7.3)
+- [x] Migração aplicada ao banco (2026-07-16 — tabela `alerts_alert`;
+      2026-08-23 — novo tipo `inconsistency`)
+- [x] `alerts/admin.py` (2026-08-23, adiantado pela Etapa 7.3)
+- [x] **9.1 Alertas automáticos (seca, excesso de chuva, risco
+      hídrico, anomalia climática)** (2026-08-23) — `spi/alert_checks.py`
+      (novo): 4 funções, cada uma olhando o **SpiResult mais recente**
+      de cada estação (condição atual, não histórico), em combinações
+      diferentes de escala/severidade pra não duplicar sinal — seca
+      (SPI-3), excesso de chuva (SPI-3), risco hídrico (SPI-6),
+      anomalia (SPI-12, só extremos). Command
+      `spi/management/commands/detectar_alertas_climaticos.py` grava
+      via `alerts.Alert` (`get_or_create`, idempotente, mesmo padrão
+      da 7.3). Cartão "Alertas Climáticos" em
+      `farms/detalhe_fazenda.html` (separado do cartão de
+      inconsistência da 7.3). Testado com estações sintéticas
+      cobrindo os 4 tipos simultaneamente e contra a fazenda real do
+      usuário (0 alertas — condições atuais normais/úmidas, resultado
+      correto). Ver [DECISOES.md](DECISOES.md) sobre a escolha de
+      escala/severidade de cada tipo.
+- [x] **9.2 Insights para tomada de decisão** (2026-08-23) —
+      `dashboard/insights.py` (novo): texto interpretativo baseado em
+      regras sobre o SPI já calculado (sem IA/ML, decisão confirmada
+      com o usuário), agrupando os itens do PDF que são a mesma
+      leitura reformulada — déficit hídrico/irrigação/janela de
+      plantio (SPI-3 atual), tendência de seca/pluviométrica (variação
+      do SPI-3 em 3 meses), apoio à gestão hídrica (SPI-6), risco
+      climático (contagem dos alertas ativos da 9.1). Reaproveita
+      `spi.services.classificar_spi`, sem duplicar limiares. Cartão
+      "Insights" em `dashboard/painel.html`. Testado com fazenda
+      sintética cobrindo os 4 tipos de insight simultaneamente e com a
+      fazenda real do usuário em modo leitura. Ver
+      [DECISOES.md](DECISOES.md).
+- **Pendência consciente:** notificações (email/WhatsApp) não
+      implementadas — decisão explícita do usuário, confirmada por
+      pergunta direta; o próprio PDF já marca esse item como "futuro",
+      não como parte central da etapa. Mesmo tratamento dado à
+      verificação de e-mail na Etapa 4.
 
-## Etapa 10 — Projeções climáticas
+**Etapa 9 (alertas e insights automáticos) está completa: 9.1 e 9.2
+concluídas.**
 
-- [~] Schema `Projection` definido (cenário, valor, data)
-- [x] Migração aplicada ao banco (2026-07-16 — tabela `climate_projection`)
-- [ ] Lógica de tendências/cenários futuros
-- [ ] Machine learning / modelos preditivos — marcado como "futuro" no PDF
+## Etapa 10 — Projeções climáticas (completa)
+
+- [x] Schema `Projection` definido (cenário, valor, data) — ganhou
+      `unique_together = ('date', 'scenario', 'station')` na 10.2
+      (`climate.0005`, precisava pra `update_or_create` idempotente)
+- [x] Migração aplicada ao banco (2026-07-16 — tabela `climate_projection`;
+      2026-08-23 — `unique_together` novo)
+- [x] **10.1 Análise histórica + tendência temporal** (2026-08-23) —
+      `climate/trends.py` (novo): `totais_anuais(municipio)` +
+      `tendencia_anual(municipio)` (regressão linear simples,
+      `statistics.linear_regression` nativo do Python 3.10+, sem
+      dependência nova — mesma família de `statistics.correlation` já
+      usada na 7.2), mínimo 10 anos civis completos. Calculado
+      on-the-fly (barato, sem persistir), exibido em cartão "Tendência
+      Histórica" em `farms/detalhe_fazenda.html`. Testado contra dado
+      real do usuário: Tangará da Serra, -3,5 mm/ano sobre 45 anos
+      (1981-2025) — plausível e coerente com o resumo por década já
+      levantado na Etapa 3.2 (década de 2020 mais seca).
+- [x] **10.2 Cenários futuros (climatologia histórica)** (2026-08-23,
+      mesmo dia) — `climate/trends.py`:
+      `normais_climatologicas_mensais(municipio)` (média/mediana/
+      percentis 25-75/mín/máx por mês do calendário, mesmo
+      agrupamento "por mês, todos os anos" já usado no SPI da 7.1) +
+      `cenarios_futuros(municipio, meses=6)` (3 faixas — seco/normal/
+      úmido — dos percentis 25/50/75). Command
+      `climate/management/commands/gerar_projecoes.py` grava em
+      `climate.Projection` (model do PDF, sem uso desde a Etapa 1) por
+      estação de cada município `ativo=True`, `update_or_create`
+      idempotente. Cartão "Cenários Futuros" em
+      `farms/detalhe_fazenda.html`, deixando explícito na UI que não é
+      machine learning nem previsão de modelo climático. Testado com
+      dado real (janeiro ~273mm mediana vs. julho ~9mm mediana em
+      Tangará da Serra — coerente com estação seca/chuvosa da região)
+      e com fazenda sintética temporária pra conferir renderização no
+      navegador. Ver [DECISOES.md](DECISOES.md).
+- **Confirmado com o usuário antes de codar** (pergunta direta): sem
+      machine learning/IA/modelos preditivos — o PDF já marca esses
+      como "Futuro", fora do escopo desta etapa.
+
+## Etapa 11 — Exportação de dados (fora do escopo original do PDF, completa)
+
+> Pedido do usuário depois de fechar as 10 etapas do PDF, não faz
+> parte de [REQUISITOS.md](REQUISITOS.md) — mantido aqui pra registro,
+> igual às outras etapas.
+
+- [x] **Exportação Excel (.xlsx) por fazenda** (2026-08-23) —
+      `farms/exports.py` (novo): `gerar_workbook_fazenda(fazenda)`
+      monta um `.xlsx` com 9 abas (Fazenda, Estações, Talhões, Chuva
+      Local, CHIRPS do Município, SPI, Validação CHIRPS, Alertas,
+      Cenários Futuros) — dado bruto pra reanalisar em Excel/R/Python/
+      SPSS fora da plataforma. Reaproveita `openpyxl` (já dependência
+      desde a Etapa 6), sem lib nova. Botão "Exportar Excel" em
+      `farms/detalhe_fazenda.html`. Testado com fazenda sintética
+      (todas as 9 abas populadas corretamente, CHIRPS com 16.649
+      linhas) e contra a fazenda real do usuário em modo leitura.
+- [x] **Relatório pra imprimir/PDF** (2026-08-23, mesmo dia) — página
+      standalone `farms/relatorio_fazenda.html` (não estende
+      `base.html` — sem navbar/rodapé), com CSS `@media print`. O
+      usuário aperta Ctrl+P e usa "Salvar como PDF" do próprio
+      navegador — decisão explícita do usuário: **sem** biblioteca de
+      geração de PDF no servidor (WeasyPrint foi considerado e
+      descartado — exigiria libs de sistema Pango/Cairo na imagem
+      Docker, dependência pesada pra um ganho pequeno frente ao
+      "imprimir do navegador"). Botão "Relatório" em
+      `farms/detalhe_fazenda.html`. Testado no navegador via
+      Playwright — todas as seções renderizando com dado real
+      (tendência, cenários, dados da fazenda).
+- Refatoração: `farms/views.py` ganhou `_dados_analiticos_fazenda(fazenda)`
+  — extrai as ~10 queries (SPI, validação, correção, alertas,
+  tendência, cenários) que `detalhe_fazenda` e `relatorio_fazenda`
+  precisam em comum, pra não duplicar a mesma "foto" analítica em duas
+  views.
+- Ver [DECISOES.md](DECISOES.md) sobre a escolha "imprimir do
+  navegador" vs. PDF gerado no servidor.
+
+## Etapa 12 — Manual de uso do sistema (fora do escopo original do PDF, completa)
+
+> Pedido do usuário depois da Etapa 11. Também não faz parte de
+> [REQUISITOS.md](REQUISITOS.md).
+
+- [x] **Página de Ajuda dentro do sistema** (2026-08-23) —
+      `core/views.py:ajuda` (novo, público, sem `@login_required`) +
+      `core/templates/core/ajuda.html` (novo): 8 seções com índice de
+      links internos — criando conta, cadastrando fazenda (mapa ou
+      shapefile), talhões/estações, lançando chuva (manual/importação),
+      o Painel, a página de cada fazenda (SPI/validação/alertas/
+      tendência/cenários), exportação/relatório, dúvidas comuns. Rota
+      `GET /ajuda/`. Linkado na navbar de `base.html` (aparece em toda
+      página logada) e na navbar própria da Home (`core/index.html`,
+      que não usa `base.html`). Escolhido **página dentro do sistema**
+      em vez de documento separado, decisão do usuário (pergunta
+      direta) — ajuda o usuário final na hora da dúvida, ao custo de
+      precisar manter atualizada a cada mudança de tela. Testado no
+      navegador via Playwright: link visível tanto anônimo (Home)
+      quanto logado, navegação por âncora funcionando, todas as 8
+      seções presentes.
+
+## Etapa 13 — Gestão de usuários (completa parte do que a Etapa 4 do PDF deixou em aberto)
+
+> O PDF pedia "permissões" dentro de "Cadastro de Usuários" (Etapa 4),
+> mas só cadastro/login/recuperação de senha foram feitos lá — gerenciar
+> OUTROS usuários (bloquear, trocar de papel) ficou faltando até o
+> usuário pedir, depois de virar administrador da própria conta.
+
+- [x] **Bloquear/desbloquear usuário + trocar perfil** (2026-08-23) —
+      `accounts/views_gestao.py` (novo): `lista_usuarios`,
+      `alternar_bloqueio` (`User.is_active`, com trava contra
+      autobloqueio), `alterar_perfil` (`Profile.profile_type`).
+      Acesso restrito a `is_superuser` ou `profile_type='admin'`.
+      Rota `/painel/usuarios/` (`accounts/urls_gestao.py`, namespace
+      `gestao_usuarios` — separado de `accounts/urls.py`, que só tem
+      fluxos públicos de auth). Link "Gerenciar Usuários" no Painel,
+      só visível pra admin. Testado com Django test client (sem
+      precisar de senha real): bloqueio impede login de verdade (sem
+      sessão criada), autobloqueio recusado com mensagem de erro,
+      troca de perfil confirmada e revertida. Ver
+      [DECISOES.md](DECISOES.md).
 
 ## Transversais (não ligadas a uma única etapa)
 

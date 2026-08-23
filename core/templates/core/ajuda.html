@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Ajuda — GeoClima MT{% endblock %}
+{% block extra_head %}
+<style>
+    .conteudo-principal { align-items: flex-start !important; }
+    .pagina-ajuda { width: 100%; max-width: 900px; margin: 0 auto; }
+    .card-secao { background-color: #ffffff; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); margin-bottom: 1.5rem; scroll-margin-top: 1rem; }
+    .card-secao h2 { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.75rem; }
+    .card-secao h3 { font-size: 0.95rem; font-weight: 700; margin-top: 1.25rem; margin-bottom: 0.5rem; color: #495057; }
+    .indice { background-color: #ffffff; border-radius: 1rem; padding: 1.25rem 1.5rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+    .indice ol { margin: 0; padding-left: 1.2rem; columns: 2; column-gap: 2rem; }
+    .indice li { margin-bottom: 0.3rem; }
+    .indice a { color: #0d6efd; text-decoration: none; }
+    .indice a:hover { text-decoration: underline; }
+    .caixa-dica { background-color: #f0f7ff; border-left: 4px solid #0d6efd; padding: 0.75rem 1rem; border-radius: 0.4rem; font-size: 0.9rem; margin: 0.75rem 0; }
+    .caixa-aviso { background-color: #fff8e6; border-left: 4px solid #ffc107; padding: 0.75rem 1rem; border-radius: 0.4rem; font-size: 0.9rem; margin: 0.75rem 0; }
+    @media (max-width: 576px) { .indice ol { columns: 1; } }
+</style>
+{% endblock %}
+{% block content %}
+<div class="pagina-ajuda">
+    <div class="card-secao">
+        <h1 class="h4 fw-bold mb-2"><i class="fas fa-circle-question"></i> Como usar o GeoClima MT</h1>
+        <p class="text-muted mb-0">
+            Guia rápido de cada parte do sistema. Se você ainda não tem conta, dá pra ler tudo aqui
+            antes de se cadastrar — o cadastro é gratuito e leva menos de um minuto.
+        </p>
+    </div>
+
+    <div class="indice">
+        <strong class="d-block mb-2">Nesta página</strong>
+        <ol>
+            <li><a href="#conta">Criando sua conta</a></li>
+            <li><a href="#fazenda">Cadastrando uma fazenda</a></li>
+            <li><a href="#talhoes-estacoes">Talhões e estações</a></li>
+            <li><a href="#chuva">Lançando dados de chuva</a></li>
+            <li><a href="#painel">O Painel (seu dashboard)</a></li>
+            <li><a href="#pagina-fazenda">A página de cada fazenda</a></li>
+            <li><a href="#exportar">Exportando dados e imprimindo relatório</a></li>
+            <li><a href="#duvidas">Dúvidas comuns</a></li>
+        </ol>
+    </div>
+
+    <div id="conta" class="card-secao">
+        <h2><i class="fas fa-user-plus"></i> 1. Criando sua conta</h2>
+        <p>
+            Clique em <strong>"Acessar Painel"</strong> na Home e depois em <strong>"Criar conta"</strong>.
+            Preencha nome, e-mail e senha — não existe campo pra escolher seu papel no sistema (todo
+            cadastro público vira "produtor" automaticamente, por segurança).
+        </p>
+        <p>
+            Esqueceu a senha? Na tela de login, clique em <strong>"Esqueci minha senha"</strong> e
+            siga o link enviado por e-mail.
+        </p>
+        <div class="caixa-dica">
+            <strong>Isolamento de dados:</strong> cada conta só enxerga suas próprias fazendas,
+            estações, lançamentos de chuva e alertas. Nenhum outro usuário consegue ver seus dados.
+        </div>
+    </div>
+
+    <div id="fazenda" class="card-secao">
+        <h2><i class="fas fa-tractor"></i> 2. Cadastrando uma fazenda</h2>
+        <p>No Painel, clique em <strong>"Minhas Fazendas" → "Nova Fazenda"</strong>. Duas formas de informar a localização:</p>
+        <h3>Clicando no mapa</h3>
+        <p>Escolha Estado e Cidade, e clique no mapa no ponto da sede da fazenda — as coordenadas preenchem sozinhas.</p>
+        <h3>Importando um Shapefile</h3>
+        <p>
+            Se você já tem o contorno da propriedade em Shapefile (arquivo <code>.zip</code> com
+            <code>.shp</code>/<code>.dbf</code>/<code>.prj</code> etc.), pode enviar direto no formulário.
+            O contorno vira o polígono da fazenda automaticamente, e se o arquivo também tiver pontos
+            (poços, estações, estruturas), cada ponto vira uma <strong>estação já cadastrada</strong> —
+            não precisa cadastrar uma por uma depois.
+        </p>
+        <div class="caixa-dica">Área, cultura e observações são opcionais — pode preencher depois, editando a fazenda.</div>
+    </div>
+
+    <div id="talhoes-estacoes" class="card-secao">
+        <h2><i class="fas fa-map-marked-alt"></i> 3. Talhões e estações</h2>
+        <p>
+            <strong>Talhão</strong> é uma subdivisão da fazenda (um lote, um piquete, uma área de
+            plantio específica). <strong>Estação</strong> é onde a chuva é medida (um pluviômetro, uma
+            estação automática, ou só o local de referência dos seus lançamentos manuais).
+        </p>
+        <p>
+            Os dois são cadastrados do mesmo jeito: pela página da fazenda, clicando em
+            "Novo Talhão"/"Nova Estação" e marcando o ponto no mapa. Se você importou um Shapefile
+            com pontos, suas estações já podem ter sido criadas automaticamente (ver seção anterior).
+        </p>
+    </div>
+
+    <div id="chuva" class="card-secao">
+        <h2><i class="fas fa-cloud-rain"></i> 4. Lançando dados de chuva</h2>
+        <p>Em <strong>"Dados de Chuva"</strong> no Painel, duas formas de registrar chuva medida na sua propriedade:</p>
+        <h3>Lançamento manual</h3>
+        <p>Escolhe a estação, a data, o valor em mm — horário e observações são opcionais.</p>
+        <h3>Importação de planilha</h3>
+        <p>
+            Envie um arquivo <code>.csv</code> ou <code>.xlsx</code> com colunas de data e valor (o
+            sistema reconhece cabeçalhos comuns em português e inglês, não precisa seguir um modelo
+            rígido). Relançar a mesma estação+data com um valor diferente <strong>atualiza</strong> o
+            lançamento existente, não duplica.
+        </p>
+        <div class="caixa-aviso">
+            Chuva negativa é bloqueada na hora do lançamento. Valores muito acima do normal (mais de
+            200mm num dia) ou dados repetidos/com longos períodos sem lançamento geram um alerta de
+            possível inconsistência — não impedem o cadastro, só avisam pra você conferir.
+        </div>
+    </div>
+
+    <div id="painel" class="card-secao">
+        <h2><i class="fas fa-gauge-high"></i> 5. O Painel (seu dashboard)</h2>
+        <p>
+            É a tela principal depois do login (<strong>"Painel"</strong> no menu). Se você tem mais
+            de uma fazenda, um seletor no topo escolhe qual delas está sendo mostrada nos cartões
+            abaixo. O que aparece:
+        </p>
+        <ul>
+            <li><strong>Insights</strong> — leitura automática da situação atual (déficit hídrico, tendência, risco climático), em texto simples, baseada no SPI.</li>
+            <li><strong>Mapa das Minhas Fazendas</strong> — todas as suas fazendas de uma vez, não só a selecionada.</li>
+            <li><strong>Previsão Climática</strong> — condição atual e próximos 5 dias (dado meteorológico em tempo real, não histórico).</li>
+            <li><strong>Chuva Atual e Acumulados</strong> — último valor registrado e totais de 7/30/90 dias.</li>
+            <li><strong>Série de Chuva, Tendência do SPI e Comparação CHIRPS × Local</strong> — gráficos de série temporal.</li>
+        </ul>
+    </div>
+
+    <div id="pagina-fazenda" class="card-secao">
+        <h2><i class="fas fa-magnifying-glass-chart"></i> 6. A página de cada fazenda</h2>
+        <p>Clicando numa fazenda específica (não no Painel geral), você vê a análise completa dela:</p>
+        <ul>
+            <li><strong>SPI</strong> (Índice de Precipitação Padronizada) — indica se o período está seco, normal ou úmido em relação ao histórico, em 3 escalas de tempo (3, 6 e 12 meses).</li>
+            <li><strong>Validação CHIRPS × Dado Local</strong> — o quanto a estimativa de satélite (CHIRPS) bate com o que sua estação mediu de verdade. Só aparece depois que você tiver lançado chuva local suficiente.</li>
+            <li><strong>CHIRPS Corrigido</strong> — o valor de satélite ajustado pelo viés medido na sua estação.</li>
+            <li><strong>Alertas</strong> — dois grupos: possíveis inconsistências no dado que você lançou, e alertas climáticos de verdade (seca, excesso de chuva, risco hídrico, anomalia).</li>
+            <li><strong>Tendência Histórica e Cenários Futuros</strong> — se a chuva do município está subindo ou caindo ao longo das décadas, e faixas (seco/normal/úmido) do que normalmente chove nos próximos meses, baseado no histórico — <strong>não é previsão de modelo climático nem inteligência artificial</strong>, é estatística sobre o passado.</li>
+        </ul>
+        <div class="caixa-dica">
+            Município fora da área de cobertura do CHIRPS (hoje: Tangará da Serra e Cáceres/MT)? SPI,
+            validação, tendência e cenários não aparecem ainda — não é erro, é porque essas análises
+            dependem do histórico de satélite daquele município ter sido processado.
+        </div>
+    </div>
+
+    <div id="exportar" class="card-secao">
+        <h2><i class="fas fa-file-export"></i> 7. Exportando dados e imprimindo relatório</h2>
+        <p>Na página de cada fazenda, dois botões no topo:</p>
+        <ul>
+            <li><strong>Exportar Excel</strong> — baixa uma planilha com todo o dado bruto da fazenda (chuva, SPI, validação, alertas, cenários), pra abrir em Excel, R, Python ou outra ferramenta de análise.</li>
+            <li><strong>Relatório</strong> — abre uma versão formatada pra impressão. Use <kbd>Ctrl+P</kbd> (ou <kbd>Cmd+P</kbd> no Mac) e escolha "Salvar como PDF" na janela de impressão do navegador pra gerar um PDF.</li>
+        </ul>
+    </div>
+
+    <div id="duvidas" class="card-secao">
+        <h2><i class="fas fa-circle-info"></i> 8. Dúvidas comuns</h2>
+        <h3>Cadastrei uma fazenda e o SPI não aparece. É erro?</h3>
+        <p>
+            Provavelmente não. O SPI só é calculado pra municípios com histórico de CHIRPS já
+            processado (hoje: Tangará da Serra e Cáceres/MT). Fora dessas regiões, o cálculo ainda
+            não roda automaticamente.
+        </p>
+        <h3>Lancei chuva local, mas a "Validação CHIRPS × Local" continua vazia.</h3>
+        <p>
+            É preciso ter pelo menos 3 dias de chuva local lançados em datas que o CHIRPS também já
+            cobre, pra ter pares suficientes pra comparar.
+        </p>
+        <h3>Posso editar/excluir um lançamento de chuva ou uma fazenda?</h3>
+        <p>
+            Sim, em qualquer tela de listagem (fazendas, estações, chuva) há botões de editar/excluir
+            por item. Excluir uma fazenda apaga também os talhões e estações dela.
+        </p>
+    </div>
+</div>
+{% endblock %}

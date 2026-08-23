@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Dados de Chuva — GeoClima MT{% endblock %}
+{% block extra_head %}
+<style>
+    .conteudo-principal { align-items: flex-start !important; }
+    .pagina-chuva { width: 100%; max-width: 900px; margin: 0 auto; }
+    .card-secao { background-color: #ffffff; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
+    .item-lancamento { display: flex; justify-content: space-between; align-items: center; padding: 0.9rem 1rem; border-radius: 0.6rem; background-color: #f8f9fa; margin-bottom: 0.5rem; }
+    .badge-origem { font-size: 0.7rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="pagina-chuva">
+    <a href="{% url 'dashboard:painel' %}" class="d-inline-block mb-3 small">← Voltar ao Painel</a>
+
+    {% if messages %}
+        {% for mensagem in messages %}<div class="alert alert-{{ mensagem.tags }}">{{ mensagem }}</div>{% endfor %}
+    {% endif %}
+
+    <div class="card-secao">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <h1 class="h4 fw-bold m-0"><i class="fas fa-cloud-rain"></i> Dados de Chuva</h1>
+            <div>
+                <a href="{% url 'climate:importar_arquivo' %}" class="btn btn-outline-primary btn-sm"><i class="fas fa-file-arrow-up"></i> Importar Arquivo</a>
+                <a href="{% url 'climate:criar_lancamento' %}" class="btn btn-primary btn-sm"><i class="fas fa-plus"></i> Novo Lançamento</a>
+            </div>
+        </div>
+
+        {% if not tem_estacao %}
+            <p class="text-muted">
+                Você precisa de uma estação cadastrada antes de lançar ou importar dados de chuva.
+                <a href="{% url 'stations:criar_estacao' %}">Cadastrar estação</a>.
+            </p>
+        {% elif not lancamentos %}
+            <p class="text-muted">Nenhum lançamento de chuva ainda. Comece com "Novo Lançamento" ou "Importar Arquivo".</p>
+        {% else %}
+            {% for lancamento in lancamentos %}
+                <div class="item-lancamento">
+                    <div>
+                        <strong>{{ lancamento.date }}{% if lancamento.time %} às {{ lancamento.time }}{% endif %}</strong>
+                        — {{ lancamento.value }} mm
+                        <span class="badge bg-secondary badge-origem">{{ lancamento.get_source_type_display }}</span>
+                        <div class="text-muted small">
+                            {{ lancamento.station.name }} ({{ lancamento.farm.name }})
+                            {% if lancamento.notes %} · {{ lancamento.notes }}{% endif %}
+                        </div>
+                    </div>
+                    <div>
+                        <a href="{% url 'climate:editar_lancamento' lancamento.id %}" class="btn btn-sm btn-outline-secondary">Editar</a>
+                        <a href="{% url 'climate:excluir_lancamento' lancamento.id %}" class="btn btn-sm btn-outline-danger">Excluir</a>
+                    </div>
+                </div>
+            {% endfor %}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

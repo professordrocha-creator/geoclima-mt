@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% load l10n %}
+{% block title %}{% if editando %}Editar{% else %}Novo{% endif %} Talhão — GeoClima MT{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+    .card-form { background-color: #ffffff; border-radius: 1rem; padding: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); width: 100%; max-width: 640px; }
+    .card-form h1 { font-size: 1.4rem; font-weight: 700; color: #1a1a1a; margin-bottom: 0.25rem; }
+    #mapaTalhao { height: 300px; border-radius: 0.8rem; margin-top: 0.5rem; }
+    .dica-mapa { font-size: 0.85rem; color: #6c757d; margin-top: 0.4rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card-form">
+    <h1><i class="fas fa-map-marked-alt"></i> {% if editando %}Editar Talhão{% else %}Novo Talhão{% endif %}</h1>
+    <p class="text-muted small mb-3">Fazenda: {{ fazenda.name }}</p>
+
+    <form method="post" id="formTalhao">
+        {% csrf_token %}
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label">{{ form.name.label }}</label>
+                {{ form.name }}
+            </div>
+            <div class="col-12">
+                <div class="dica-mapa"><i class="fas fa-info-circle"></i> Clique no mapa (ou arraste o marcador) para marcar a localização do talhão.</div>
+                <div id="mapaTalhao"></div>
+            </div>
+            <div class="col-6">
+                <label class="form-label">{{ form.area.label }}</label>
+                {{ form.area }}
+            </div>
+            <div class="col-6">
+                <label class="form-label">{{ form.crop.label }}</label>
+                {{ form.crop }}
+            </div>
+        </div>
+
+        {{ form.latitude }}
+        {{ form.longitude }}
+
+        <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary flex-fill">
+                {% if editando %}Salvar Alterações{% else %}Cadastrar Talhão{% endif %}
+            </button>
+            <a href="{% url 'farms:detalhe_fazenda' fazenda.id %}" class="btn btn-outline-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    {% localize off %}
+    const centroFazenda = { lat: {{ fazenda.latitude }}, lon: {{ fazenda.longitude }} };
+    const posicaoInicial = {
+        {% if editando %}
+        lat: {{ talhao.latitude }}, lon: {{ talhao.longitude }},
+        {% else %}
+        lat: null, lon: null,
+        {% endif %}
+    };
+    {% endlocalize %}
+
+    const mapa = L.map("mapaTalhao");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap contributors",
+        maxZoom: 19,
+    }).addTo(mapa);
+
+    let marcador = null;
+
+    function posicionarMarcador(lat, lon) {
+        if (marcador) {
+            marcador.setLatLng([lat, lon]);
+        } else {
+            marcador = L.marker([lat, lon], { draggable: true }).addTo(mapa);
+            marcador.on("dragend", () => {
+                const posicao = marcador.getLatLng();
+                atualizarCampos(posicao.lat, posicao.lng);
+            });
+        }
+        atualizarCampos(lat, lon);
+    }
+
+    function atualizarCampos(lat, lon) {
+        document.getElementById("id_latitude").value = lat.toFixed(6);
+        document.getElementById("id_longitude").value = lon.toFixed(6);
+    }
+
+    mapa.on("click", (evento) => posicionarMarcador(evento.latlng.lat, evento.latlng.lng));
+
+    if (posicaoInicial.lat !== null) {
+        mapa.setView([posicaoInicial.lat, posicaoInicial.lon], 14);
+        posicionarMarcador(posicaoInicial.lat, posicaoInicial.lon);
+    } else {
+        // Sem posição ainda — centraliza na sede da fazenda como ponto de partida.
+        mapa.setView([centroFazenda.lat, centroFazenda.lon], 13);
+    }
+    setTimeout(() => mapa.invalidateSize(), 150);
+
+    document.getElementById("formTalhao").addEventListener("submit", (evento) => {
+        if (!document.getElementById("id_latitude").value) {
+            evento.preventDefault();
+            alert("Clique no mapa para marcar a localização do talhão antes de salvar.");
+        }
+    });
+</script>
+{% endblock %}

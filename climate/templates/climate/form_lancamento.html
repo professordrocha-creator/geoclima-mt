@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{% if editando %}Editar{% else %}Novo{% endif %} Lançamento — GeoClima MT{% endblock %}
+{% block extra_head %}
+<style>
+    .card-form { background-color: #ffffff; border-radius: 1rem; padding: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); width: 100%; max-width: 520px; }
+    .card-form h1 { font-size: 1.4rem; font-weight: 700; color: #1a1a1a; margin-bottom: 1.25rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card-form">
+    <h1><i class="fas fa-cloud-rain"></i> {% if editando %}Editar Lançamento{% else %}Novo Lançamento de Chuva{% endif %}</h1>
+
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+
+    <form method="post">
+        {% csrf_token %}
+        {% for campo in form %}
+            <div class="mb-3">
+                <label class="form-label">{{ campo.label }}</label>
+                {{ campo }}
+                {% if campo.help_text %}<div class="form-text">{{ campo.help_text }}</div>{% endif %}
+                {% for erro in campo.errors %}<div class="text-danger small">{{ erro }}</div>{% endfor %}
+            </div>
+        {% endfor %}
+        <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary flex-fill">
+                {% if editando %}Salvar Alterações{% else %}Lançar{% endif %}
+            </button>
+            <a href="{% url 'climate:lista_lancamentos' %}" class="btn btn-outline-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Minhas Estações — GeoClima MT{% endblock %}
+{% block extra_head %}
+<style>
+    .conteudo-principal { align-items: flex-start !important; }
+    .pagina-estacoes { width: 100%; max-width: 800px; margin: 0 auto; }
+    .card-secao { background-color: #ffffff; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
+    .item-estacao { display: flex; justify-content: space-between; align-items: center; padding: 1rem; border-radius: 0.6rem; background-color: #f8f9fa; margin-bottom: 0.6rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="pagina-estacoes">
+    <a href="{% url 'dashboard:painel' %}" class="d-inline-block mb-3 small">← Voltar ao Painel</a>
+
+    {% if messages %}
+        {% for mensagem in messages %}<div class="alert alert-{{ mensagem.tags }}">{{ mensagem }}</div>{% endfor %}
+    {% endif %}
+
+    <div class="card-secao">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h1 class="h4 fw-bold m-0"><i class="fas fa-satellite-dish"></i> Minhas Estações</h1>
+            <a href="{% url 'stations:criar_estacao' %}" class="btn btn-primary btn-sm"><i class="fas fa-plus"></i> Nova Estação</a>
+        </div>
+
+        {% for estacao in estacoes %}
+            <div class="item-estacao">
+                <div>
+                    <strong>{{ estacao.name }}</strong>
+                    <div class="text-muted small">{{ estacao.get_station_type_display }} · {{ estacao.farm.name }}</div>
+                </div>
+                <div>
+                    <a href="{% url 'stations:editar_estacao' estacao.id %}" class="btn btn-sm btn-outline-secondary">Editar</a>
+                    <a href="{% url 'stations:excluir_estacao' estacao.id %}" class="btn btn-sm btn-outline-danger">Excluir</a>
+                </div>
+            </div>
+        {% empty %}
+            <p class="text-muted">Você ainda não cadastrou nenhuma estação.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

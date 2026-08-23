@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% load l10n %}
+{% block title %}{% if editando %}Editar{% else %}Nova{% endif %} Fazenda — GeoClima MT{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+    .card-form { background-color: #ffffff; border-radius: 1rem; padding: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); width: 100%; max-width: 760px; }
+    .card-form h1 { font-size: 1.4rem; font-weight: 700; color: #1a1a1a; margin-bottom: 1.25rem; }
+    #mapaFazenda { height: 320px; border-radius: 0.8rem; margin-top: 0.5rem; }
+    .dica-mapa { font-size: 0.85rem; color: #6c757d; margin-top: 0.4rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card-form">
+    <h1><i class="fas fa-tractor"></i> {% if editando %}Editar Fazenda{% else %}Nova Fazenda{% endif %}</h1>
+
+    {% if form.non_field_errors %}
+        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <form method="post" id="formFazenda" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label">{{ form.name.label }}</label>
+                {{ form.name }}
+                {% for erro in form.name.errors %}<div class="text-danger small">{{ erro }}</div>{% endfor %}
+            </div>
+
+            <div class="col-6">
+                <label class="form-label">Estado</label>
+                <select id="estadoSelect" class="form-select"><option>Carregando...</option></select>
+            </div>
+            <div class="col-6">
+                <label class="form-label">Cidade</label>
+                <select id="cidadeSelect" class="form-select"><option>Selecione o estado</option></select>
+                {% for erro in form.municipio.errors %}<div class="text-danger small">{{ erro }}</div>{% endfor %}
+            </div>
+
+            <div class="col-12">
+                <label class="form-label">{{ form.shapefile.label }}</label>
+                {{ form.shapefile }}
+                <div class="form-text">{{ form.shapefile.help_text }}</div>
+                {% for erro in form.shapefile.errors %}<div class="text-danger small">{{ erro }}</div>{% endfor %}
+                {% if editando and fazenda.poligono %}
+                    <div class="text-success small mt-1"><i class="fas fa-check-circle"></i> Esta fazenda já tem um contorno importado. Enviar outro shapefile substitui o contorno atual.</div>
+                {% endif %}
+            </div>
+
+            <div class="col-12">
+                <div class="dica-mapa"><i class="fas fa-info-circle"></i> Sem shapefile, clique no mapa (ou arraste o marcador) para marcar a localização exata da fazenda.</div>
+                <div id="mapaFazenda"></div>
+                {% for erro in form.latitude.errors %}<div class="text-danger small">{{ erro }}</div>{% endfor %}
+                {% for erro in form.longitude.errors %}<div class="text-danger small">{{ erro }}</div>{% endfor %}
+            </div>
+
+            <div class="col-6">
+                <label class="form-label">{{ form.area.label }}</label>
+                {{ form.area }}
+            </div>
+            <div class="col-6">
+                <label class="form-label">{{ form.crop.label }}</label>
+                {{ form.crop }}
+            </div>
+            <div class="col-12">
+                <label class="form-label">{{ form.notes.label }}</label>
+                {{ form.notes }}
+            </div>
+        </div>
+
+        {{ form.municipio }}
+        {{ form.latitude }}
+        {{ form.longitude }}
+
+        <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary flex-fill">
+                {% if editando %}Salvar Alterações{% else %}Cadastrar Fazenda{% endif %}
+            </button>
+            <a href="{% if editando %}{% url 'farms:detalhe_fazenda' fazenda.id %}{% else %}{% url 'farms:lista_fazendas' %}{% endif %}" class="btn btn-outline-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // Dados iniciais (edição) injetados pelo Django — na criação ficam nulos.
+    const municipioInicial = {
+        {% if editando %}
+        id: {{ fazenda.municipio_id }},
+        uf: "{{ fazenda.municipio.uf }}",
+        {% else %}
+        id: null,
+        uf: null,
+        {% endif %}
+    };
+    {% localize off %}
+    const posicaoInicial = {
+        {% if editando %}
+        lat: {{ fazenda.latitude }},
+        lon: {{ fazenda.longitude }},
+        {% else %}
+        lat: null,
+        lon: null,
+        {% endif %}
+    };
+    {% endlocalize %}
+    // Contorno já importado por shapefile (se houver) — só existe ao editar.
+    const poligonoInicial = {% if editando and fazenda.poligono %}{{ fazenda.poligono.geojson|safe }}{% else %}null{% endif %};
+
+    let mapa = null;
+    let marcador = null;
+    let camadaMunicipio = null;
+    let camadaPoligonoFazenda = null;
+
+    function inicializarMapa() {
+        mapa = L.map("mapaFazenda").setView([-14.6, -57.4], 5);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            attribution: "&copy; OpenStreetMap contributors",
+            maxZoom: 19,
+        }).addTo(mapa);
+
+        mapa.on("click", (evento) => {
+            posicionarMarcador(evento.latlng.lat, evento.latlng.lng);
+        });
+
+        if (posicaoInicial.lat !== null) {
+            posicionarMarcador(posicaoInicial.lat, posicaoInicial.lon);
+            mapa.setView([posicaoInicial.lat, posicaoInicial.lon], 12);
+        }
+
+        if (poligonoInicial) {
+            camadaPoligonoFazenda = L.geoJSON(poligonoInicial, { style: { color: "#0d6efd", weight: 2, fillOpacity: 0.1 } }).addTo(mapa);
+            mapa.fitBounds(camadaPoligonoFazenda.getBounds());
+        }
+    }
+
+    function posicionarMarcador(lat, lon) {
+        if (marcador) {
+            marcador.setLatLng([lat, lon]);
+        } else {
+            marcador = L.marker([lat, lon], { draggable: true }).addTo(mapa);
+            marcador.on("dragend", () => {
+                const posicao = marcador.getLatLng();
+                atualizarCampos(posicao.lat, posicao.lng);
+            });
+        }
+        atualizarCampos(lat, lon);
+    }
+
+    function atualizarCampos(lat, lon) {
+        document.getElementById("id_latitude").value = lat.toFixed(6);
+        document.getElementById("id_longitude").value = lon.toFixed(6);
+    }
+
+    async function popularEstados() {
+        const select = document.getElementById("estadoSelect");
+        const resposta = await fetch("/api/estados/");
+        const estados = await resposta.json();
+        select.innerHTML = "";
+        estados.forEach((estado) => {
+            const opcao = document.createElement("option");
+            opcao.value = estado.sigla;
+            opcao.textContent = `${estado.nome} (${estado.sigla})`;
+            select.appendChild(opcao);
+        });
+        if (municipioInicial.uf) {
+            select.value = municipioInicial.uf;
+        }
+        await popularMunicipios(select.value, municipioInicial.id);
+    }
+
+    async function popularMunicipios(uf, autoSelecionarId) {
+        const select = document.getElementById("cidadeSelect");
+        if (!uf) return;
+        const resposta = await fetch(`/api/municipios/?uf=${encodeURIComponent(uf)}`);
+        const municipios = await resposta.json();
+        select.innerHTML = "";
+        municipios.forEach((m) => {
+            const opcao = document.createElement("option");
+            opcao.value = m.id;
+            opcao.textContent = m.destaque ? `⭐ ${m.nome}` : m.nome;
+            select.appendChild(opcao);
+        });
+        if (autoSelecionarId) {
+            select.value = String(autoSelecionarId);
+        }
+        document.getElementById("id_municipio").value = select.value;
+        await desenharMunicipio(select.value);
+    }
+
+    async function desenharMunicipio(municipioId) {
+        if (!municipioId) return;
+        const resposta = await fetch(`/api/municipios/${municipioId}/geojson/`);
+        const feature = await resposta.json();
+
+        if (camadaMunicipio) mapa.removeLayer(camadaMunicipio);
+        camadaMunicipio = L.geoJSON(feature, { style: { color: "#28a745", weight: 2, fillOpacity: 0.06 } }).addTo(mapa);
+        mapa.fitBounds(camadaMunicipio.getBounds());
+        setTimeout(() => mapa.invalidateSize(), 150);
+
+        // Só sugere o centroide como marcador inicial se ainda não há
+        // marcador (criação nova) — não pula a posição já marcada na edição.
+        if (!marcador) {
+            posicionarMarcador(feature.properties.centroide.lat, feature.properties.centroide.lon);
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        inicializarMapa();
+        popularEstados();
+
+        document.getElementById("estadoSelect").addEventListener("change", function () {
+            popularMunicipios(this.value, null);
+        });
+        document.getElementById("cidadeSelect").addEventListener("change", function () {
+            document.getElementById("id_municipio").value = this.value;
+            desenharMunicipio(this.value);
+        });
+
+        document.getElementById("formFazenda").addEventListener("submit", (evento) => {
+            const temShapefileSelecionado = document.getElementById("id_shapefile").files.length > 0;
+            const temLocalizacaoNoMapa = !!document.getElementById("id_latitude").value;
+            const jaTinhaLocalizacao = poligonoInicial !== null || posicaoInicial.lat !== null;
+
+            // Só exige clique no mapa se não veio shapefile novo E não tinha
+            // localização nenhuma antes (nem polígono, nem marcador salvo).
+            if (!temShapefileSelecionado && !temLocalizacaoNoMapa && !jaTinhaLocalizacao) {
+                evento.preventDefault();
+                alert("Clique no mapa para marcar a localização da fazenda, ou envie um shapefile com o contorno da propriedade.");
+            }
+        });
+    });
+</script>
+{% endblock %}

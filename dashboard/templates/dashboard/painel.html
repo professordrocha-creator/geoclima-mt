@@ -1,23 +1,375 @@
 {% extends "base.html" %}
+{% load l10n %}
 {% block title %}Painel — GeoClima MT{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+    .conteudo-principal { align-items: flex-start !important; }
+    .pagina-painel { width: 100%; max-width: 900px; margin: 0 auto; }
+    .card-secao { background-color: #ffffff; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+    .card-numero { text-align: center; padding: 1rem; border-radius: 0.8rem; background-color: #f8f9fa; }
+    .card-numero .valor { font-size: 1.6rem; font-weight: 700; }
+    .card-numero .rotulo { font-size: 0.8rem; color: #6c757d; }
+    #graficoChuva, #graficoSpi, #graficoComparacao { max-height: 320px; }
+    #mapaFazendas { height: 280px; border-radius: 0.8rem; }
+    .dia-previsao { text-align: center; padding: 0.6rem 0.3rem; border-radius: 0.6rem; background-color: #f8f9fa; }
+    .dia-previsao .icone { font-size: 1.3rem; color: #0d6efd; }
+</style>
+{% endblock %}
 {% block content %}
-<div class="card-auth text-center" style="max-width: 520px;">
-    <h1><i class="fas fa-user-circle"></i> Olá, {{ user.first_name|default:user.username }}!</h1>
-    <p class="text-muted">
-        Você está logado como <strong>{{ user.username }}</strong>
-        ({{ user.email|default:"sem e-mail cadastrado" }}).
-    </p>
-    <p>
-        <span class="badge bg-primary" style="font-size: 0.9rem;">
-            Perfil: {{ profile.get_profile_type_display }}
-        </span>
-    </p>
-    <hr>
-    <p class="text-muted small">
-        Esta é a área privada do GeoClima MT. O dashboard completo (chuva,
-        SPI, gráficos, fazendas, comparação CHIRPS × dados locais) chega
-        nas próximas etapas do projeto — por enquanto, isto é só a
-        confirmação de que o seu login funciona.
-    </p>
+<div class="pagina-painel">
+    <div class="card-secao">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h1 class="h4 fw-bold m-0"><i class="fas fa-user-circle"></i> Olá, {{ user.first_name|default:user.username }}!</h1>
+                <span class="badge bg-primary mt-1">Perfil: {{ profile.get_profile_type_display }}</span>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+                <a href="{% url 'farms:lista_fazendas' %}" class="btn btn-outline-primary btn-sm"><i class="fas fa-tractor"></i> Minhas Fazendas</a>
+                <a href="{% url 'stations:lista_estacoes' %}" class="btn btn-outline-primary btn-sm"><i class="fas fa-satellite-dish"></i> Minhas Estações</a>
+                <a href="{% url 'climate:lista_lancamentos' %}" class="btn btn-outline-primary btn-sm"><i class="fas fa-cloud-rain"></i> Dados de Chuva</a>
+                {% if user.is_superuser or profile.profile_type == "admin" %}
+                    <a href="{% url 'gestao_usuarios:lista' %}" class="btn btn-outline-dark btn-sm"><i class="fas fa-users-gear"></i> Gerenciar Usuários</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% if not fazendas %}
+        <div class="card-secao text-center">
+            <p class="text-muted mb-3">Você ainda não cadastrou nenhuma fazenda — o dashboard de chuva aparece aqui assim que tiver uma.</p>
+            <a href="{% url 'farms:criar_fazenda' %}" class="btn btn-primary btn-sm"><i class="fas fa-plus"></i> Cadastrar Fazenda</a>
+        </div>
+    {% else %}
+        <div class="card-secao">
+            <label for="seletorFazenda" class="form-label fw-bold small">Fazenda</label>
+            <select id="seletorFazenda" class="form-select" onchange="window.location.href='?fazenda=' + this.value">
+                {% for fazenda in fazendas %}
+                    <option value="{{ fazenda.id }}" {% if fazenda.id == fazenda_selecionada.id %}selected{% endif %}>
+                        {{ fazenda.name }} ({{ fazenda.municipio.nome }}/{{ fazenda.municipio.uf }})
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="card-secao">
+            <h2 class="h5 fw-bold mb-3"><i class="fas fa-lightbulb"></i> Insights — {{ fazenda_selecionada.name }}</h2>
+            {% if insights %}
+                {% for insight in insights %}
+                    <div class="d-flex align-items-start gap-2 mb-2">
+                        <i class="fas {{ insight.icone }} text-primary mt-1"></i>
+                        <p class="mb-0 small">{{ insight.texto }}</p>
+                    </div>
+                {% endfor %}
+                <p class="text-muted mt-2 mb-0" style="font-size: 0.75rem;">
+                    Interpretação automática baseada em regras sobre o SPI — apoio à decisão, não substitui avaliação agronômica.
+                </p>
+            {% else %}
+                <p class="text-muted small mb-0">Sem insights ainda pra esta fazenda.</p>
+            {% endif %}
+        </div>
+
+        <div class="card-secao">
+            <h2 class="h5 fw-bold mb-3"><i class="fas fa-map-marked-alt"></i> Mapa das Minhas Fazendas</h2>
+            <div id="mapaFazendas"></div>
+        </div>
+
+        <div class="card-secao">
+            <h2 class="h5 fw-bold mb-3"><i class="fas fa-cloud-sun"></i> Previsão Climática — {{ fazenda_selecionada.name }}</h2>
+            <div id="previsaoClimatica" class="text-muted small">Carregando previsão…</div>
+        </div>
+
+        <div class="card-secao">
+            <h2 class="h5 fw-bold mb-3"><i class="fas fa-cloud-rain"></i> Chuva Atual — {{ fazenda_selecionada.name }}</h2>
+            {% if dados_chuva.atual %}
+                <div class="card-numero" style="max-width: 260px;">
+                    <div class="valor">{{ dados_chuva.atual.value|floatformat:1 }} mm</div>
+                    <div class="rotulo">
+                        {{ dados_chuva.atual.date|date:"d/m/Y" }} —
+                        {% if dados_chuva.atual.origem == "local" %}medido localmente{% else %}estimado (CHIRPS){% endif %}
+                    </div>
+                </div>
+            {% else %}
+                <p class="text-muted small mb-0">
+                    Sem dado de chuva ainda pra esta fazenda — nem lançamento local, nem CHIRPS
+                    (município ainda não tem processamento CHIRPS habilitado).
+                </p>
+            {% endif %}
+        </div>
+
+        <div class="card-secao">
+            <h2 class="h5 fw-bold mb-3"><i class="fas fa-water"></i> Acumulados</h2>
+            <div class="row g-2">
+                {% for janela in dados_chuva.acumulados %}
+                    <div class="col-4">
+                        <div class="card-numero">
+                            <div class="valor">
+                                {% if janela.local_mm is not None %}{{ janela.local_mm|floatformat:0 }}{% elif janela.chirps_mm is not None %}{{ janela.chirps_mm|floatformat:0 }}{% else %}—{% endif %} mm
+                            </div>
+                            <div class="rotulo">
+                                últimos {{ janela.dias }} dias
+                                {% if janela.local_mm is None and janela.chirps_mm is not None %}(CHIRPS){% endif %}
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+            <p class="text-muted small mt-2 mb-0">
+                Prioriza dado lançado localmente; usa CHIRPS (estimativa por satélite) só nas janelas sem lançamento local.
+            </p>
+        </div>
+
+        <div class="card-secao">
+            <h2 class="h5 fw-bold mb-3"><i class="fas fa-chart-line"></i> Série de Chuva (últimos 90 dias)</h2>
+            {% if dados_chuva.serie %}
+                <canvas id="graficoChuva"></canvas>
+            {% else %}
+                <p class="text-muted small mb-0">Sem dado de chuva (local ou CHIRPS) nos últimos 90 dias pra esta fazenda.</p>
+            {% endif %}
+        </div>
+
+        <div class="card-secao">
+            <h2 class="h5 fw-bold mb-3"><i class="fas fa-droplet-slash"></i> Tendência do SPI</h2>
+            {% if spi_disponivel %}
+                <canvas id="graficoSpi"></canvas>
+            {% else %}
+                <p class="text-muted small mb-0">
+                    SPI ainda não calculado pra este município, ou histórico de CHIRPS
+                    insuficiente. {% if not fazenda_selecionada.municipio.ativo %}Este município não tem processamento de CHIRPS habilitado ainda.{% endif %}
+                </p>
+            {% endif %}
+        </div>
+
+        <div class="card-secao">
+            <h2 class="h5 fw-bold mb-3"><i class="fas fa-check-double"></i> Comparação CHIRPS × Dado Local</h2>
+            {% if dados_comparacao %}
+                <canvas id="graficoComparacao"></canvas>
+                <p class="text-muted small mt-2 mb-0">
+                    Cada ponto é um dia com CHIRPS e dado local pareados. Quanto mais perto da
+                    linha diagonal, mais o CHIRPS bate com o que a estação mediu. Métricas
+                    completas (R², RMSE, MBE...) na página de cada fazenda.
+                </p>
+            {% else %}
+                <p class="text-muted small mb-0">
+                    Ainda não há dado local suficiente pareado com o CHIRPS pra comparar
+                    (lance ou importe chuva na estação, em dias que o CHIRPS já cobre).
+                </p>
+            {% endif %}
+        </div>
+    {% endif %}
 </div>
+{% endblock %}
+{% block extra_scripts %}
+{% if fazendas %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    {% localize off %}
+    const minhasFazendas = [
+        {% for fazenda in fazendas %}
+        {
+            nome: "{{ fazenda.name|escapejs }}",
+            municipio: "{{ fazenda.municipio.nome|escapejs }}/{{ fazenda.municipio.uf }}",
+            lat: {{ fazenda.latitude }},
+            lon: {{ fazenda.longitude }},
+            selecionada: {% if fazenda.id == fazenda_selecionada.id %}true{% else %}false{% endif %},
+        },
+        {% endfor %}
+    ];
+    {% endlocalize %}
+
+    const mapaFazendas = L.map("mapaFazendas");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap contributors",
+        maxZoom: 19,
+    }).addTo(mapaFazendas);
+
+    const marcadoresFazendas = minhasFazendas.map((f) => {
+        const marcador = L.marker([f.lat, f.lon]).bindPopup(`<strong>${f.nome}</strong><br>${f.municipio}`);
+        if (f.selecionada) marcador.bindTooltip(f.nome, { permanent: true, direction: "top" });
+        return marcador;
+    });
+    const grupoFazendas = L.featureGroup(marcadoresFazendas).addTo(mapaFazendas);
+
+    if (minhasFazendas.length > 1) {
+        mapaFazendas.fitBounds(grupoFazendas.getBounds(), { maxZoom: 12, padding: [20, 20] });
+    } else {
+        mapaFazendas.setView([minhasFazendas[0].lat, minhasFazendas[0].lon], 12);
+    }
+    setTimeout(() => mapaFazendas.invalidateSize(), 150);
+
+    // Previsão climática (Open-Meteo, direto do navegador — mesmo padrão da Home pública,
+    // sem passar pelo backend Django). Mapeamento de weather_code reduzido ao essencial
+    // pro card compacto do dashboard (a versão completa fica na Home).
+    const CODIGOS_TEMPO = {
+        0: { texto: "Céu limpo", icone: "fa-sun" }, 1: { texto: "Poucas nuvens", icone: "fa-sun" },
+        2: { texto: "Parc. nublado", icone: "fa-cloud-sun" }, 3: { texto: "Nublado", icone: "fa-cloud" },
+        45: { texto: "Névoa", icone: "fa-smog" }, 48: { texto: "Névoa", icone: "fa-smog" },
+        51: { texto: "Chuvisco", icone: "fa-cloud-rain" }, 53: { texto: "Chuvisco", icone: "fa-cloud-rain" }, 55: { texto: "Chuvisco", icone: "fa-cloud-rain" },
+        61: { texto: "Chuva leve", icone: "fa-cloud-showers-heavy" }, 63: { texto: "Chuva", icone: "fa-cloud-showers-heavy" }, 65: { texto: "Chuva forte", icone: "fa-cloud-showers-heavy" },
+        80: { texto: "Pancadas", icone: "fa-cloud-showers-heavy" }, 81: { texto: "Pancadas", icone: "fa-cloud-showers-heavy" }, 82: { texto: "Pancadas fortes", icone: "fa-cloud-showers-heavy" },
+        95: { texto: "Trovoada", icone: "fa-bolt" }, 96: { texto: "Trovoada", icone: "fa-bolt" }, 99: { texto: "Trovoada", icone: "fa-bolt" },
+    };
+    function infoTempo(codigo) { return CODIGOS_TEMPO[codigo] || { texto: "—", icone: "fa-question-circle" }; }
+
+    {% localize off %}
+    const latFazendaSelecionada = {{ fazenda_selecionada.latitude }};
+    const lonFazendaSelecionada = {{ fazenda_selecionada.longitude }};
+    {% endlocalize %}
+
+    const urlPrevisao = `https://api.open-meteo.com/v1/forecast?latitude=${latFazendaSelecionada}&longitude=${lonFazendaSelecionada}` +
+        `&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m` +
+        `&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_sum&timezone=auto&forecast_days=5`;
+
+    fetch(urlPrevisao)
+        .then((resposta) => resposta.json())
+        .then((dado) => {
+            const container = document.getElementById("previsaoClimatica");
+            if (!dado.current || !dado.daily) {
+                container.innerHTML = '<p class="text-muted small mb-0">Previsão indisponível no momento.</p>';
+                return;
+            }
+            const atual = infoTempo(dado.current.weather_code);
+            let html = `
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <i class="fas ${atual.icone} fa-2x text-primary"></i>
+                    <div>
+                        <div class="fs-4 fw-bold">${Math.round(dado.current.temperature_2m)}°C</div>
+                        <div class="text-muted small">${atual.texto} — umidade ${dado.current.relative_humidity_2m}%, vento ${Math.round(dado.current.wind_speed_10m)} km/h</div>
+                    </div>
+                </div>
+                <div class="row g-2">`;
+            for (let i = 0; i < dado.daily.time.length; i++) {
+                const dia = infoTempo(dado.daily.weather_code[i]);
+                const data = new Date(dado.daily.time[i] + "T00:00:00");
+                html += `
+                    <div class="col">
+                        <div class="dia-previsao">
+                            <div class="small text-muted">${data.toLocaleDateString("pt-BR", { weekday: "short" })}</div>
+                            <i class="fas ${dia.icone} icone"></i>
+                            <div class="small">${Math.round(dado.daily.temperature_2m_max[i])}° / ${Math.round(dado.daily.temperature_2m_min[i])}°</div>
+                            <div class="small text-muted">${dado.daily.precipitation_sum[i].toFixed(1)}mm</div>
+                        </div>
+                    </div>`;
+            }
+            html += "</div>";
+            container.innerHTML = html;
+        })
+        .catch(() => {
+            document.getElementById("previsaoClimatica").innerHTML =
+                '<p class="text-muted small mb-0">Não foi possível carregar a previsão climática agora.</p>';
+        });
+</script>
+{% endif %}
+{% if dados_chuva.serie or spi_disponivel or dados_comparacao %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+{% endif %}
+{% if dados_chuva.serie %}
+<script>
+    {% localize off %}
+    const serieChuva = [
+        {% for dia in dados_chuva.serie %}
+        { data: "{{ dia.date|date:'d/m' }}", local: {% if dia.local is not None %}{{ dia.local }}{% else %}null{% endif %}, chirps: {% if dia.chirps is not None %}{{ dia.chirps }}{% else %}null{% endif %} },
+        {% endfor %}
+    ];
+    {% endlocalize %}
+
+    new Chart(document.getElementById("graficoChuva"), {
+        type: "line",
+        data: {
+            labels: serieChuva.map((d) => d.data),
+            datasets: [
+                { label: "Local (lançado)", data: serieChuva.map((d) => d.local), borderColor: "#0d6efd", spanGaps: true, tension: 0.2 },
+                { label: "CHIRPS (estimado)", data: serieChuva.map((d) => d.chirps), borderColor: "#fd7e14", spanGaps: true, tension: 0.2 },
+            ],
+        },
+        options: {
+            responsive: true,
+            scales: { y: { title: { display: true, text: "mm" } } },
+        },
+    });
+</script>
+{% endif %}
+{% if spi_disponivel %}
+<script>
+    {% localize off %}
+    const serieSpi = [
+        {% for linha in dados_spi %}
+        {
+            data: "{{ linha.date|date:'m/Y' }}",
+            spi3: {% if linha.spi_3 is not None %}{{ linha.spi_3 }}{% else %}null{% endif %},
+            spi6: {% if linha.spi_6 is not None %}{{ linha.spi_6 }}{% else %}null{% endif %},
+            spi12: {% if linha.spi_12 is not None %}{{ linha.spi_12 }}{% else %}null{% endif %},
+        },
+        {% endfor %}
+    ];
+    {% endlocalize %}
+
+    new Chart(document.getElementById("graficoSpi"), {
+        type: "line",
+        data: {
+            labels: serieSpi.map((l) => l.data),
+            datasets: [
+                { label: "SPI-3", data: serieSpi.map((l) => l.spi3), borderColor: "#0d6efd", borderWidth: 1, pointRadius: 0, spanGaps: true, tension: 0.2 },
+                { label: "SPI-6", data: serieSpi.map((l) => l.spi6), borderColor: "#198754", borderWidth: 2, pointRadius: 0, spanGaps: true, tension: 0.2 },
+                { label: "SPI-12", data: serieSpi.map((l) => l.spi12), borderColor: "#6f42c1", borderWidth: 2, pointRadius: 0, spanGaps: true, tension: 0.2 },
+            ],
+        },
+        options: {
+            responsive: true,
+            scales: { y: { title: { display: true, text: "SPI (z-score)" } } },
+        },
+    });
+</script>
+{% endif %}
+{% if dados_comparacao %}
+<script>
+    {% localize off %}
+    const comparacaoChirpsLocal = [
+        {% for estacao in dados_comparacao %}
+        {
+            station: "{{ estacao.station|escapejs }}",
+            pontos: [
+                {% for par in estacao.pares %}
+                { x: {{ par.chirps }}, y: {{ par.local }} },
+                {% endfor %}
+            ],
+        },
+        {% endfor %}
+    ];
+    {% endlocalize %}
+
+    const coresComparacao = ["#0d6efd", "#fd7e14", "#198754", "#dc3545"];
+    const todosPontos = comparacaoChirpsLocal.flatMap((e) => e.pontos);
+    const maiorValor = Math.max(...todosPontos.map((p) => Math.max(p.x, p.y)), 1);
+
+    new Chart(document.getElementById("graficoComparacao"), {
+        type: "scatter",
+        data: {
+            datasets: [
+                ...comparacaoChirpsLocal.map((e, i) => ({
+                    label: e.station,
+                    data: e.pontos,
+                    backgroundColor: coresComparacao[i % coresComparacao.length],
+                })),
+                {
+                    type: "line",
+                    label: "Concordância perfeita (CHIRPS = local)",
+                    data: [{ x: 0, y: 0 }, { x: maiorValor, y: maiorValor }],
+                    borderColor: "#adb5bd",
+                    borderDash: [6, 4],
+                    pointRadius: 0,
+                    borderWidth: 1,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { title: { display: true, text: "CHIRPS (mm)" } },
+                y: { title: { display: true, text: "Local (mm)" } },
+            },
+        },
+    });
+</script>
+{% endif %}
 {% endblock %}

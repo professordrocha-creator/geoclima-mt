@@ -37,8 +37,14 @@
             <a class="navbar-brand" href="{% url 'home' %}">🌍 GeoClima MT</a>
             <div class="ms-auto">
                 {% block navbar_extra %}
+                    <a href="{% url 'ajuda' %}" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-circle-question"></i> Ajuda
+                    </a>
                     {% if user.is_authenticated %}
-                        <span class="text-white me-3 small">Olá, {{ user.first_name|default:user.username }}</span>
+                        <a href="{% url 'dashboard:painel' %}" class="btn btn-outline-light btn-sm me-2">
+                            <i class="fas fa-house"></i> Painel
+                        </a>
+                        <span class="text-white me-3 small d-none d-sm-inline">Olá, {{ user.first_name|default:user.username }}</span>
                         <a href="{% url 'accounts:logout' %}" class="btn btn-login btn-sm text-white">Sair</a>
                     {% else %}
                         <a href="{% url 'accounts:login' %}" class="btn btn-login btn-sm text-white">🔒 Acessar Painel (Login)</a>

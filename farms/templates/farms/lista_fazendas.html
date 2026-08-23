@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% load l10n %}
+{% block title %}Minhas Fazendas — GeoClima MT{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+    .conteudo-principal { align-items: flex-start !important; }
+    .pagina-fazendas { width: 100%; max-width: 900px; margin: 0 auto; }
+    .card-secao { background-color: #ffffff; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+    #mapaFazendas { height: 320px; border-radius: 0.8rem; }
+    .item-fazenda { display: flex; justify-content: space-between; align-items: center; padding: 1rem; border-radius: 0.6rem; background-color: #f8f9fa; margin-bottom: 0.6rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="pagina-fazendas">
+    <a href="{% url 'dashboard:painel' %}" class="d-inline-block mb-3 small">← Voltar ao Painel</a>
+
+    {% if messages %}
+        {% for mensagem in messages %}
+            <div class="alert alert-{{ mensagem.tags }}">{{ mensagem }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card-secao">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h1 class="h4 fw-bold m-0"><i class="fas fa-tractor"></i> Minhas Fazendas</h1>
+            <a href="{% url 'farms:criar_fazenda' %}" class="btn btn-primary btn-sm"><i class="fas fa-plus"></i> Nova Fazenda</a>
+        </div>
+
+        {% if fazendas %}
+            <div id="mapaFazendas" class="mb-3"></div>
+        {% endif %}
+
+        {% if fazendas %}
+            {% for fazenda in fazendas %}
+                <div class="item-fazenda">
+                    <div>
+                        <strong>{{ fazenda.name }}</strong>
+                        <div class="text-muted small">{{ fazenda.municipio.nome }}/{{ fazenda.municipio.uf }}{% if fazenda.crop %} · {{ fazenda.crop }}{% endif %}{% if fazenda.area %} · {{ fazenda.area }} ha{% endif %}</div>
+                    </div>
+                    <div>
+                        <a href="{% url 'farms:detalhe_fazenda' fazenda.id %}" class="btn btn-sm btn-outline-primary">Ver</a>
+                        <a href="{% url 'farms:editar_fazenda' fazenda.id %}" class="btn btn-sm btn-outline-secondary">Editar</a>
+                        <a href="{% url 'farms:excluir_fazenda' fazenda.id %}" class="btn btn-sm btn-outline-danger">Excluir</a>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p class="text-muted">Você ainda não cadastrou nenhuma fazenda.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    {% localize off %}
+    const fazendas = [
+        {% for fazenda in fazendas %}
+        { nome: "{{ fazenda.name|escapejs }}", lat: {{ fazenda.latitude }}, lon: {{ fazenda.longitude }}, url: "{% url 'farms:detalhe_fazenda' fazenda.id %}" },
+        {% endfor %}
+    ];
+    {% endlocalize %}
+
+    if (fazendas.length > 0) {
+        const mapa = L.map("mapaFazendas");
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            attribution: "&copy; OpenStreetMap contributors",
+            maxZoom: 19,
+        }).addTo(mapa);
+
+        const marcadores = fazendas.map((f) => L.marker([f.lat, f.lon]).bindPopup(`<strong>${f.nome}</strong><br><a href="${f.url}">Ver fazenda</a>`));
+        const grupo = L.featureGroup(marcadores).addTo(mapa);
+        mapa.fitBounds(grupo.getBounds(), { maxZoom: 12, padding: [20, 20] });
+        setTimeout(() => mapa.invalidateSize(), 150);
+    }
+</script>
+{% endblock %}

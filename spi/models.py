@@ -8,6 +8,7 @@ class SpiResult(models.Model):
     CLASSIFICATIONS = [
         ('extremamente_umido', 'Extremamente Úmido'),
         ('muito_umido', 'Muito Úmido'),
+        ('moderadamente_umido', 'Moderadamente Úmido'),
         ('normal', 'Normal'),
         ('seca_moderada', 'Seca Moderada'),
         ('seca_severa', 'Seca Severa'),

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Gerenciar Usuários — GeoClima MT{% endblock %}
+{% block extra_head %}
+<style>
+    .conteudo-principal { align-items: flex-start !important; }
+    .pagina-usuarios { width: 100%; max-width: 1000px; margin: 0 auto; }
+    .card-secao { background-color: #ffffff; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+    table td { vertical-align: middle; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="pagina-usuarios">
+    {% if messages %}
+        {% for mensagem in messages %}<div class="alert alert-{{ mensagem.tags }}">{{ mensagem }}</div>{% endfor %}
+    {% endif %}
+
+    <div class="card-secao">
+        <h1 class="h4 fw-bold mb-1"><i class="fas fa-users-gear"></i> Gerenciar Usuários</h1>
+        <p class="text-muted small mb-0">
+            Visível só pra administradores. Bloquear impede o login imediatamente, sem apagar
+            nenhum dado do usuário. Trocar o perfil muda o papel dele no sistema (não afeta
+            isolamento de dados — cada um continua vendo só as próprias fazendas).
+        </p>
+    </div>
+
+    <div class="card-secao">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Usuário</th>
+                        <th>E-mail</th>
+                        <th>Perfil</th>
+                        <th>Status</th>
+                        <th>Cadastrado em</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for usuario in usuarios %}
+                        <tr>
+                            <td>
+                                <strong>{{ usuario.username }}</strong>
+                                {% if usuario == request.user %}<span class="badge bg-secondary ms-1">você</span>{% endif %}
+                                {% if usuario.is_superuser %}<span class="badge bg-dark ms-1">superusuário</span>{% endif %}
+                            </td>
+                            <td class="small text-muted">{{ usuario.email|default:"—" }}</td>
+                            <td>
+                                <form method="post" action="{% url 'gestao_usuarios:alterar_perfil' usuario.id %}" class="d-flex gap-1">
+                                    {% csrf_token %}
+                                    <select name="profile_type" class="form-select form-select-sm" style="width: auto;">
+                                        {% for valor, rotulo in perfis %}
+                                            <option value="{{ valor }}" {% if usuario.profile.profile_type == valor %}selected{% endif %}>{{ rotulo }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary">Salvar</button>
+                                </form>
+                            </td>
+                            <td>
+                                {% if usuario.is_active %}
+                                    <span class="badge bg-success">Ativo</span>
+                                {% else %}
+                                    <span class="badge bg-danger">Bloqueado</span>
+                                {% endif %}
+                            </td>
+                            <td class="small text-muted">{{ usuario.date_joined|date:"d/m/Y" }}</td>
+                            <td>
+                                {% if usuario != request.user %}
+                                    <form method="post" action="{% url 'gestao_usuarios:alternar_bloqueio' usuario.id %}">
+                                        {% csrf_token %}
+                                        {% if usuario.is_active %}
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">Bloquear</button>
+                                        {% else %}
+                                            <button type="submit" class="btn btn-sm btn-outline-success">Desbloquear</button>
+                                        {% endif %}
+                                    </form>
+                                {% else %}
+                                    <span class="text-muted small">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

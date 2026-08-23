@@ -110,6 +110,7 @@
         <div class="container-fluid">
             <a class="navbar-brand" href="#">🌍 GeoClima MT</a>
             <div class="ms-auto">
+                <a href="{% url 'ajuda' %}" class="btn btn-outline-light btn-sm text-white me-2">❓ Ajuda</a>
                 {% if user.is_authenticated %}
                     <a href="{% url 'dashboard:painel' %}" class="btn btn-login btn-sm text-white">👤 Meu Painel</a>
                 {% else %}

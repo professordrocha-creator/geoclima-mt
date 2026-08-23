@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Importar Arquivo — GeoClima MT{% endblock %}
+{% block extra_head %}
+<style>
+    .card-form { background-color: #ffffff; border-radius: 1rem; padding: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); width: 100%; max-width: 560px; }
+    .card-form h1 { font-size: 1.4rem; font-weight: 700; color: #1a1a1a; margin-bottom: 1.25rem; }
+    .dica-formato { font-size: 0.85rem; color: #6c757d; background-color: #f8f9fa; border-radius: 0.6rem; padding: 0.8rem 1rem; margin-bottom: 1.25rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card-form">
+    <h1><i class="fas fa-file-arrow-up"></i> Importar Arquivo de Chuva</h1>
+
+    <div class="dica-formato">
+        <i class="fas fa-info-circle"></i> O arquivo (.csv ou .xlsx) precisa ter colunas de
+        <strong>data</strong> e <strong>valor</strong> (mm) no cabeçalho — nomes aceitos:
+        "data"/"date", "valor"/"chuva"/"precipitacao". Colunas de "horario" e "observacoes"
+        são opcionais. Datas: AAAA-MM-DD ou DD/MM/AAAA.
+    </div>
+
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {% for campo in form %}
+            <div class="mb-3">
+                <label class="form-label">{{ campo.label }}</label>
+                {{ campo }}
+                {% if campo.help_text %}<div class="form-text">{{ campo.help_text }}</div>{% endif %}
+                {% for erro in campo.errors %}<div class="text-danger small">{{ erro }}</div>{% endfor %}
+            </div>
+        {% endfor %}
+        <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary flex-fill">Importar</button>
+            <a href="{% url 'climate:lista_lancamentos' %}" class="btn btn-outline-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

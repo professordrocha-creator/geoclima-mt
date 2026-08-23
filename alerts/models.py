@@ -10,6 +10,11 @@ class Alert(models.Model):
         ('excess_rain', 'Alerta de Excesso de Chuva'),
         ('water_risk', 'Risco Hídrico'),
         ('anomaly', 'Anomalia Climática'),
+        # Adicionado na Etapa 7.3 — detecção de inconsistências no dado
+        # local (chuva negativa, valor extremo, duplicado, falha
+        # temporal). Diferente de 'anomaly' (que é sobre o CLIMA em si,
+        # Etapa 9): este tipo é sobre a QUALIDADE do dado lançado.
+        ('inconsistency', 'Possível Inconsistência'),
     ]
 
     alert_type = models.CharField(max_length=50, choices=ALERT_TYPES, verbose_name="Tipo de Alerta")

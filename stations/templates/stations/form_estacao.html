@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% load l10n %}
+{% block title %}{% if editando %}Editar{% else %}Nova{% endif %} Estação — GeoClima MT{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+    .card-form { background-color: #ffffff; border-radius: 1rem; padding: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); width: 100%; max-width: 640px; }
+    .card-form h1 { font-size: 1.4rem; font-weight: 700; color: #1a1a1a; margin-bottom: 1.25rem; }
+    #mapaEstacao { height: 300px; border-radius: 0.8rem; margin-top: 0.5rem; }
+    .dica-mapa { font-size: 0.85rem; color: #6c757d; margin-top: 0.4rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card-form">
+    <h1><i class="fas fa-satellite-dish"></i> {% if editando %}Editar Estação{% else %}Nova Estação{% endif %}</h1>
+
+    {% if not fazendas %}
+        <p class="text-muted">
+            Você precisa cadastrar uma fazenda antes de criar uma estação.
+        </p>
+        <a href="{% url 'farms:criar_fazenda' %}" class="btn btn-primary">Cadastrar Fazenda</a>
+    {% else %}
+        <form method="post" id="formEstacao">
+            {% csrf_token %}
+            <div class="row g-3">
+                <div class="col-12">
+                    <label class="form-label">{{ form.name.label }}</label>
+                    {{ form.name }}
+                </div>
+                <div class="col-6">
+                    <label class="form-label">{{ form.station_type.label }}</label>
+                    {{ form.station_type }}
+                </div>
+                <div class="col-6">
+                    <label class="form-label">{{ form.farm.label }}</label>
+                    {{ form.farm }}
+                </div>
+                <div class="col-12">
+                    <div class="dica-mapa"><i class="fas fa-info-circle"></i> Clique no mapa (ou arraste o marcador) para marcar a localização da estação.</div>
+                    <div id="mapaEstacao"></div>
+                </div>
+            </div>
+
+            {{ form.latitude }}
+            {{ form.longitude }}
+
+            <div class="d-flex gap-2 mt-4">
+                <button type="submit" class="btn btn-primary flex-fill">
+                    {% if editando %}Salvar Alterações{% else %}Cadastrar Estação{% endif %}
+                </button>
+                <a href="{% url 'stations:lista_estacoes' %}" class="btn btn-outline-secondary">Cancelar</a>
+            </div>
+        </form>
+    {% endif %}
+</div>
+{% endblock %}
+{% block extra_scripts %}
+{% if fazendas %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // Coordenadas de cada fazenda do usuário, para recentralizar o mapa
+    // quando a fazenda escolhida no <select> mudar.
+    {% localize off %}
+    const coordenadasFazendas = {
+        {% for fazenda in fazendas %}
+        {{ fazenda.id }}: { lat: {{ fazenda.latitude }}, lon: {{ fazenda.longitude }} },
+        {% endfor %}
+    };
+    const posicaoInicial = {
+        {% if editando %}
+        lat: {{ estacao.latitude }}, lon: {{ estacao.longitude }},
+        {% else %}
+        lat: null, lon: null,
+        {% endif %}
+    };
+    {% endlocalize %}
+
+    const mapa = L.map("mapaEstacao");
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap contributors",
+        maxZoom: 19,
+    }).addTo(mapa);
+
+    let marcador = null;
+    let camadaContornoFazenda = null;
+
+    // Desenha o contorno importado por shapefile da fazenda escolhida (se
+    // ela tiver um) como camada de referência — só visual, não obrigatório.
+    async function desenharContornoFazenda(farmId) {
+        if (camadaContornoFazenda) {
+            mapa.removeLayer(camadaContornoFazenda);
+            camadaContornoFazenda = null;
+        }
+        if (!farmId) return;
+        try {
+            const resposta = await fetch(`/painel/fazendas/${farmId}/poligono.json`);
+            const dados = await resposta.json();
+            if (dados.poligono) {
+                camadaContornoFazenda = L.geoJSON(dados.poligono, { style: { color: "#0d6efd", weight: 2, fillOpacity: 0.08 } }).addTo(mapa);
+            }
+        } catch (erro) {
+            console.error("Não consegui carregar o contorno da fazenda:", erro);
+        }
+    }
+
+    function posicionarMarcador(lat, lon) {
+        if (marcador) {
+            marcador.setLatLng([lat, lon]);
+        } else {
+            marcador = L.marker([lat, lon], { draggable: true }).addTo(mapa);
+            marcador.on("dragend", () => {
+                const posicao = marcador.getLatLng();
+                atualizarCampos(posicao.lat, posicao.lng);
+            });
+        }
+        atualizarCampos(lat, lon);
+    }
+
+    function atualizarCampos(lat, lon) {
+        document.getElementById("id_latitude").value = lat.toFixed(6);
+        document.getElementById("id_longitude").value = lon.toFixed(6);
+    }
+
+    mapa.on("click", (evento) => posicionarMarcador(evento.latlng.lat, evento.latlng.lng));
+
+    const selectFazenda = document.getElementById("id_farm");
+    selectFazenda.addEventListener("change", function () {
+        const coordenadas = coordenadasFazendas[this.value];
+        if (coordenadas) {
+            mapa.setView([coordenadas.lat, coordenadas.lon], 13);
+        }
+        desenharContornoFazenda(this.value);
+    });
+
+    if (posicaoInicial.lat !== null) {
+        mapa.setView([posicaoInicial.lat, posicaoInicial.lon], 14);
+        posicionarMarcador(posicaoInicial.lat, posicaoInicial.lon);
+    } else {
+        const coordenadas = coordenadasFazendas[selectFazenda.value];
+        if (coordenadas) {
+            mapa.setView([coordenadas.lat, coordenadas.lon], 13);
+        } else {
+            mapa.setView([-14.6, -57.4], 5);
+        }
+    }
+    desenharContornoFazenda(selectFazenda.value);
+    setTimeout(() => mapa.invalidateSize(), 150);
+
+    document.getElementById("formEstacao").addEventListener("submit", (evento) => {
+        if (!document.getElementById("id_latitude").value) {
+            evento.preventDefault();
+            alert("Clique no mapa para marcar a localização da estação antes de salvar.");
+        }
+    });
+</script>
+{% endif %}
+{% endblock %}

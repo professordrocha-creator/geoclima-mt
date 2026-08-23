@@ -5,3 +5,4 @@ celery>=5.3.1
 redis>=4.6.0
 requests>=2.31.0
 earthengine-api>=1.0.0
+openpyxl>=3.1.0
