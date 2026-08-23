@@ -3,6 +3,150 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-08-23 (continuação 22) — Cache do Django trocado pra Redis (produção roda 3 workers do Gunicorn)
+
+**Contexto:** antes de subir a entrada anterior (pipeline climático
+completo) pro GitHub, o usuário pediu pra confirmar onde `CACHES`
+apontava em `geoclima/settings.py`. Confirmado: nenhuma configuração
+— Django caindo no padrão, `LocMemCache`. O usuário revelou um dado
+novo, que eu não tinha ao escrever a entrada anterior: **a produção
+real roda 3 workers do Gunicorn**, não o `runserver` único que o
+`docker-compose.yml` do repositório usa em dev. Com `LocMemCache`
+(por processo), a guarda de debounce da entrada anterior não
+protegeria nada entre os 3 workers — exatamente a limitação já
+documentada como risco futuro, só que já era o presente.
+
+**O que foi feito:**
+
+- **`geoclima/settings.py`**: `CACHES` configurado com o backend Redis
+  **nativo** do Django (`django.core.cache.backends.redis.RedisCache`,
+  disponível desde o Django 4.0) — zero lib nova, usa o pacote `redis`
+  que já é dependência do projeto (Celery). Aponta pra
+  `CACHE_REDIS_URL` (nova variável de ambiente), banco Redis **1**
+  (separado do banco 0, que o Celery já usa).
+- **`docker-compose.yml`**: `CACHE_REDIS_URL=redis://redis:6379/1`
+  adicionado só ao serviço `web` (único que cria `Station` e roda a
+  guarda) — `celery_worker`/`celery_beat` não precisam.
+
+**Testado com prova direta (não só "a configuração parece certa"):**
+- Backend confirmado via `type(caches['default'])`.
+- Chave gravada conferida fisicamente dentro do Redis via `redis-cli
+  -n 1 KEYS`.
+- **Teste decisivo**: `cache.add()` da mesma chave em duas chamadas
+  `manage.py shell` genuinamente separadas (dois processos distintos,
+  simulando o isolamento real entre workers do Gunicorn) — processo A
+  grava, processo B vê o lock e é bloqueado. Esse teste "falhava" com
+  `LocMemCache` (documentado na entrada anterior); com Redis, passa.
+- Pipeline completo (cadastro real via navegador → chain de 3 etapas)
+  re-testado do zero: resposta em 613ms, 3 etapas em ordem com
+  sucesso, dado real do usuário conferido intacto.
+
+**Detalhe operacional registrado:** variável de ambiente nova no
+`docker-compose.yml` só é aplicada com `docker compose up -d web`
+(recria o container) — `docker compose restart web` não é
+suficiente, mantém as variáveis com que o container foi criado
+originalmente.
+
+**Atualizado:** `docs/DECISOES.md` (nova entrada fechando a limitação
+que a entrada anterior tinha deixado em aberto).
+
+---
+
+## 2026-08-23 (continuação 21) — Pipeline climático completo automático (SPI → cenários → alertas)
+
+**Contexto:** extensão do que a entrada anterior implementou (só
+`calcular_spi` automático). Faltava encadear `gerar_projecoes` e
+`detectar_alertas_climaticos` na mesma automação, na ordem certa —
+alertas leem o SPI mais recente, então rodar fora de ordem geraria
+alerta desatualizado ou vazio.
+
+**Investigação feita antes de codar (pedido explícito, aprovada antes
+da implementação):**
+- `gerar_projecoes`: só aceita `--meses`, **sem `--municipio`** — roda
+  sempre pra todos os municípios `ativo=True` de uma vez.
+- `detectar_alertas_climaticos`: **sem nenhum argumento**, `100%
+  global` — `spi/alert_checks.py:_mais_recente_por_estacao` filtra só
+  por `scale`, nunca por município, varre `SpiResult` da base inteira.
+- Tempo medido de verdade (não estimado), contra o banco atual:
+  `gerar_projecoes` **7,2s**, `detectar_alertas_climaticos` **3,9s** —
+  somados ao `calcular_spi` (24-66s), o pipeline inteiro chega a
+  **~77s**.
+- Guard de idempotência do signal anterior: **confirmado que não
+  existia**. Ficou mais grave com este pedido, porque agora cada
+  disparo custa até ~77s (não só ~24-66s), e o caminho do Shapefile
+  (`farms/views.py:_criar_estacoes_do_shapefile`) já cria várias
+  estações numa única requisição — sem guard, N pontos = N pipelines
+  completos e redundantes ao mesmo tempo pro mesmo município.
+
+**O que foi feito:**
+
+- **`spi/tasks.py`**: nova task `detectar_alertas_climaticos_task`
+  (só `call_command("detectar_alertas_climaticos")`), ao lado da
+  `calcular_spi_municipio` já existente.
+- **`climate/tasks.py`**: nova task `gerar_projecoes_task` (só
+  `call_command("gerar_projecoes")`) — mora aqui, não em `spi/`,
+  porque é o command do app `climate`.
+- **`stations/signals.py`** (reescrito): em vez de disparar
+  `calcular_spi_municipio.delay()` direto, monta uma **Celery chain**
+  (`calcular_spi_municipio.si() | gerar_projecoes_task.si() |
+  detectar_alertas_climaticos_task.si()`) — a ordem é garantida pelo
+  próprio Celery (uma etapa só roda se a anterior terminou), retry
+  independente por etapa. Ganhou também uma **guarda de debounce**
+  (`django.core.cache.cache.add()`, TTL de 120s, chave por
+  `codigo_ibge`): se já existe uma chain recém-disparada pro mesmo
+  município, não dispara outra.
+
+**Decisão registrada em DECISOES.md:** Celery chain (Opção B), não uma
+task só com 3 `call_command` em sequência — decisão do usuário, com o
+raciocínio completo lá.
+
+**Nenhuma migration** — chain, tasks e guard de cache não tocam model
+nenhum.
+
+**Testado com execução real (não simulada):**
+- Chain completa disparada por 2 estações criadas na mesma fazenda:
+  só **1** `calcular_spi_municipio` recebido pelo worker (debounce
+  bloqueou a segunda) — as 3 etapas rodaram em ordem
+  (calcular_spi 47s → gerar_projecoes 0,8s → detectar_alertas 1,3s),
+  todas com sucesso, e **ambas** as estações ficaram com SPI (1.623
+  registros cada) e Projection (18 registros cada) — a chain recalcula
+  pra todas as estações do município, não só a que disparou.
+- Cadastro via formulário real no navegador (Playwright): **539ms** de
+  resposta — o pipeline de ~1 minuto roda inteiro em background.
+- **Achado durante o teste, explicado (não é bug):** testar o
+  debounce via `manage.py shell -c "..."` em duas chamadas separadas
+  mostrou uma segunda chain disparando — porque cada chamada de
+  `manage.py shell` é um **processo Python separado**, com sua própria
+  instância de `LocMemCache` (o backend padrão do Django, sem
+  configuração própria neste projeto). Refeito o teste do jeito que
+  reflete o uso real (duas estações cadastradas via **navegador**, ou
+  seja, duas requisições HTTP tratadas pelo **mesmo processo
+  `runserver`**): confirmado **1 único** disparo pras duas. A guarda
+  funciona pro caso que importa (usuário cadastrando estações pela
+  interface); só não é compartilhada entre processos `manage.py
+  shell` isolados, o que nunca acontece em uso real.
+- Estação num município `ativo=False`: comportamento preservado (já
+  testado na entrada anterior, não re-testado aqui).
+- Dados de teste removidos depois, filtrados por owner; as duas
+  fazendas reais do `daniel` conferidas intactas antes e depois.
+
+**Melhoria de UX registrada como pendência (pedido explícito, não
+implementada nesta tarefa):** hoje o dashboard mostra a mesma
+mensagem ("Ainda não há SPI suficiente...") tanto para "município sem
+CHIRPS habilitado" quanto para "SPI está sendo calculado agora, volte
+em instantes" — são situações diferentes (uma é permanente, a outra é
+temporária) que deveriam ter mensagens diferentes. Não implementado
+aqui — precisaria de alguma forma de saber que existe uma chain em
+andamento pra aquele município (ex.: reaproveitar a própria chave de
+debounce do cache pra decidir a mensagem, ou checar o estado da task
+via `AsyncResult`) — fica pra uma próxima tarefa com esse escopo
+específico.
+
+**Atualizado:** `docs/DECISOES.md` (raciocínio completo Opção A vs B,
+critério do TTL de debounce, limitação do LocMemCache por processo).
+
+---
+
 ## 2026-08-23 (continuação 20) — Cálculo automático de SPI ao cadastrar estação nova
 
 **Contexto:** pedido do usuário — hoje, uma fazenda/estação nova num

@@ -125,3 +125,22 @@ def atualizar_chirps(self):
         raise RuntimeError(f"Falha ao atualizar CHIRPS para: {', '.join(falhas)}")
 
     return resumo
+
+
+@shared_task(
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    retry_jitter=True,
+    max_retries=5,
+)
+def gerar_projecoes_task():
+    """
+    Segunda etapa da chain disparada ao cadastrar estação nova (ver
+    spi/tasks.py e stations/signals.py) — gera cenários futuros a
+    partir da climatologia histórica. `gerar_projecoes` não aceita
+    filtro por município (roda sobre todos os `ativo=True` de uma
+    vez), por isso não recebe nenhum argumento aqui.
+    """
+    logger.info("Gerando cenários futuros (climatologia histórica).")
+    call_command("gerar_projecoes")

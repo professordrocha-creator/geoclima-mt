@@ -124,6 +124,20 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 
+# Cache do Django — backend Redis nativo (disponível desde o Django 4.0,
+# sem lib nova: usa o mesmo pacote `redis` já instalado pro Celery). Sem
+# isso, o padrão é LocMemCache (por processo) — não é compartilhado entre
+# múltiplos workers do Gunicorn em produção, o que quebra qualquer lock/
+# debounce baseado em cache (ver stations/signals.py e docs/DECISOES.md).
+# Banco Redis separado do usado pelo Celery (db 1, não db 0) — só pra não
+# misturar chave de cache de aplicação com dado operacional do broker.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': os.environ.get('CACHE_REDIS_URL', 'redis://localhost:6379/1'),
+    }
+}
+
 # Google Earth Engine (Etapa 3 — integração CHIRPS). Autenticação via
 # conta de serviço; chave montada em secrets/gee-key.json (não
 # versionada — ver .gitignore) e apontada pela variável abaixo.

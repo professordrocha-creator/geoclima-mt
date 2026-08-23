@@ -1331,3 +1331,140 @@ alguma escala, a própria `calcular_serie_spi` já lida com isso (devolve
 - Dados de teste removidos depois, filtrados por
   `owner=joao.produtor`; as duas fazendas reais do `daniel`
   ("fazenda Rocha" e "faz Taruma") conferidas intactas antes e depois.
+
+## 2026-08-23 — Pipeline climático completo automático: Celery chain + guarda de debounce
+
+**Contexto:** extensão do disparo automático de `calcular_spi` (entrada
+anterior) pra incluir também `gerar_projecoes` e
+`detectar_alertas_climaticos`, respeitando a ordem obrigatória (o
+detector de alertas lê o SPI mais recente — rodar antes do SPI
+atualizado dá alerta desatualizado ou vazio).
+
+**Decisão: Celery `chain` (Opção B), não uma task única com 3
+`call_command` em sequência (Opção A) — escolha do usuário, entre as
+duas opções que eu levantei.** `chain` é o primitivo do próprio Celery
+pra exatamente esse requisito ("etapa 2 só roda se etapa 1 terminou"),
+com retry independente por etapa — se `gerar_projecoes` falhar, só ele
+re-tenta, não recalcula o SPI (24-66s) de novo à toa. Uma task
+monolítica funcionaria (todos os 3 commands são idempotentes, um
+retry do zero não corrompe nada), mas perderia essa granularidade e
+fugiria do padrão já estabelecido no projeto: uma task = um command
+(`atualizar_chirps` → `import_chirps`, `calcular_spi_municipio` →
+`calcular_spi`). Cada task nova mora no app dono do command que ela
+chama: `gerar_projecoes_task` em `climate/tasks.py` (command do app
+`climate`), `detectar_alertas_climaticos_task` em `spi/tasks.py`
+(command do app `spi`, ao lado de `calcular_spi_municipio`).
+
+**Achado real, não hipotético, que motivou uma decisão nova nesta
+tarefa:** nem `gerar_projecoes` nem `detectar_alertas_climaticos`
+aceitam `--municipio` — os dois rodam sempre globais (todos os
+municípios `ativo=True`, ou a base de `SpiResult` inteira,
+respectivamente). Hoje isso é barato porque só existem 2 municípios
+ativos; se o projeto ativar mais no futuro, esse custo cresce sem
+controle a cada estação nova cadastrada em QUALQUER município — não é
+um problema resolvido aqui (mudar isso exigiria alterar os
+management commands, fora do escopo pedido), só registrado como
+limitação conhecida caso o projeto cresça pra mais municípios.
+
+**Decisão: guarda de debounce via `django.core.cache.cache.add()`,
+TTL de 120s, chave por `codigo_ibge`.** Sem isso, o caminho do
+Shapefile (`farms/views.py:_criar_estacoes_do_shapefile`, que cria
+várias `Station` numa única requisição) dispararia uma chain completa
+e redundante — até ~77s cada — por PONTO do arquivo, todas
+recalculando o mesmo SPI/cenários/alertas do mesmo município ao mesmo
+tempo. `cache.add()` é atômico (grava só se a chave ainda não existe),
+evitando corrida entre requisições concorrentes — mais seguro que um
+`.get()` seguido de `.set()` separados. TTL de 120s escolhido com
+folga sobre o tempo medido do pipeline completo (~77s no pior caso),
+não é um valor científico, é uma margem de segurança.
+
+**Limitação conhecida e documentada da guarda: `LocMemCache` é por
+processo, não compartilhado.** O projeto não configura `CACHES` em
+`geoclima/settings.py` — o padrão do Django é `LocMemCache`, que vive
+na memória de UM processo Python só. Isso funciona corretamente para
+o caso real (toda estação cadastrada por um usuário passa pela mesma
+única instância do serviço `web`/`runserver` — confirmado testando
+duas estações via navegador em sequência, 1 único disparo). **Não
+funcionaria** se o projeto um dia escalar `web` para múltiplos
+processos/réplicas (cada um teria seu próprio `LocMemCache`, sem
+saber do lock do outro) — nesse momento, trocar para um backend de
+cache compartilhado (Redis, que o projeto já usa pro Celery) antes de
+confiar nesta guarda de novo. Descoberto durante o próprio teste desta
+tarefa: testar via `manage.py shell` em chamadas separadas (cada uma
+um processo Python distinto) mostrou a guarda "falhando" — não é bug,
+é o mesmo limite: cada chamada de shell tem seu próprio
+`LocMemCache`, isolado do processo `web` real e um do outro.
+
+**Testado com execução real (não simulada):** ver
+`docs/HISTORICO.md` pro relatório completo — chain de 3 etapas
+executando na ordem certa (medido: 47s + 0,8s + 1,3s), debounce
+confirmado bloqueando 1 de 2 disparos no cenário real (navegador,
+mesmo processo), cadastro respondendo em 539ms via Playwright, dado
+real do usuário intacto antes/depois.
+
+**Pendência registrada, não implementada aqui (pedido explícito do
+usuário pra só registrar):** o dashboard hoje não distingue "município
+sem CHIRPS" de "SPI sendo calculado agora" — as duas situações mostram
+a mesma mensagem ambígua. Ver `docs/HISTORICO.md` pro detalhe da
+solução possível (reaproveitar a chave de debounce, ou `AsyncResult`),
+fica pra uma tarefa futura com esse escopo.
+
+## 2026-08-23 — Cache do Django trocado pra Redis (fecha a limitação da entrada anterior)
+
+**Contexto:** o usuário perguntou, antes de subir a entrada anterior
+pro GitHub, onde `CACHES` apontava — confirmado (`grep` em
+`geoclima/settings.py`, sem nenhuma ocorrência) que era o padrão do
+Django, `LocMemCache`. O usuário informou um dado que eu não tinha:
+**a produção real roda 3 workers do Gunicorn**, não o `runserver`
+único que o `docker-compose.yml` deste repositório usa em
+desenvolvimento — exatamente o cenário "múltiplos processos" que a
+entrada anterior já apontava como o limite de quando `LocMemCache`
+para de funcionar. Com 3 processos independentes, cada um teria seu
+próprio `LocMemCache` isolado — a guarda de debounce (`cache.add()`
+em `stations/signals.py`) não protegeria nada entre eles: até 3
+estações cadastradas quase ao mesmo tempo (uma por worker) passariam
+cada uma pelo seu `cache.add()` sem saber das outras, disparando até 3
+pipelines completos e redundantes.
+
+**Decisão: backend Redis nativo do Django
+(`django.core.cache.backends.redis.RedisCache`), não `django-redis`
+nem nenhuma lib nova.** Disponível desde o Django 4.0 (este projeto
+usa 4.2) — usa o pacote `redis` que já é dependência do projeto desde
+sempre (pro broker/backend do Celery). Zero linha nova em
+`requirements.txt`.
+
+**Decisão: banco Redis separado do usado pelo Celery — `db 1`, não
+`db 0`.** `CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` já usam
+`redis://redis:6379/0`. Em vez de reaproveitar o mesmo banco pro cache
+do Django, criei uma variável nova (`CACHE_REDIS_URL`, padrão
+`redis://redis:6379/1` no `docker-compose.yml`, só no serviço `web` —
+é o único que cria `Station` e roda a guarda; `celery_worker`/
+`celery_beat` não precisam). Não é estritamente necessário (as chaves
+de cada um têm formato bem diferente, risco de colisão é baixo), mas
+separa dado operacional do broker/result-backend do Celery de dado de
+cache de aplicação — mais fácil de raciocinar sobre os dois
+separadamente (ex.: um `FLUSHDB` de manutenção num não afeta o outro).
+
+**Container precisou ser recriado, não só reiniciado** — variável de
+ambiente nova no `docker-compose.yml` só é aplicada com `docker
+compose up -d web` (recria o container com a env atualizada);
+`docker compose restart web` mantém as variáveis com que o container
+foi criado originalmente. Detalhe operacional que vale lembrar pra
+qualquer variável de ambiente nova adicionada daqui pra frente.
+
+**Testado com prova direta, não só confiança na configuração:**
+- Backend confirmado via `type(caches['default'])` →
+  `django.core.cache.backends.redis.RedisCache`.
+- Chave gravada por `cache.set()` conferida **fisicamente** dentro do
+  Redis via `redis-cli -n 1 KEYS` — não só que o Django não reclamou.
+- **O teste decisivo**: `cache.add()` da mesma chave rodado em duas
+  chamadas `manage.py shell` **genuinamente separadas** (dois
+  processos Python distintos, o mesmo tipo de isolamento que existe
+  entre workers do Gunicorn) — processo A grava (`True`), processo B
+  vê o lock do processo A e é bloqueado (`False`). Esse era
+  exatamente o teste que "falhava" na entrada anterior com
+  `LocMemCache`; agora passa.
+- Pipeline completo (cadastro real via navegador → chain de 3 etapas)
+  re-testado do zero com o backend novo: resposta em 613ms, as 3
+  etapas rodando em ordem e com sucesso, dado real do usuário
+  conferido intacto antes/depois.
