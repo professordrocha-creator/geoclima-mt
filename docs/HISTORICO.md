@@ -3,6 +3,610 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-09-01 (continuação 4) — Clique no mapa da home seleciona município (point-in-polygon PostGIS)
+
+**Contexto:** pedido do usuário — clicar em qualquer ponto do mapa
+principal da home deve funcionar como escolher a cidade no dropdown,
+sem exigir o menu. Endpoint novo de point-in-polygon + reaproveitamento
+total do que já existia (`aplicarSelecaoMunicipio`/`populateMunicipios`,
+zero lógica duplicada).
+
+**Endpoint**: `GET /api/municipio-por-ponto/?lat=&lon=` (`api/views.py`/
+`api/urls.py`, mesmo padrão `JsonResponse` dos vizinhos) — `ST_Intersects`
+nativo do PostGIS (`geom__intersects`), filtrado a `uf="MT"`. `null` se o
+ponto cair fora de MT.
+
+**Ajuste sobre o plano original**: usar `intersects` em vez de `contains`
+desde o início (decisão do usuário) — `contains` exclui a borda exata do
+polígono, e um clique/toque de usuário perto de uma divisa municipal é
+comum o bastante pra virar falso-negativo incômodo. Achado real durante
+o teste que confirma a escolha: um ponto exatamente sobre a fronteira
+Cuiabá/Várzea Grande (lat=-15.741986, lon=-56.110910, calculado via
+interseção real das bordas dos 2 polígonos) devolve `[]` com `contains`
+e `['Cuiabá', 'Várzea Grande']` com `intersects` — o `.first()` do
+ORM pega um dos dois, aceitável.
+
+**Frontend** (`core/templates/core/index.html`): `map.on("click", ...)`
+registrado em `initializeMap()`, chama `handleMapClick(lat, lon)` (nova,
+~20 linhas) — busca o endpoint, e se achou município repassa pra
+`populateMunicipios(uf, codigo_ibge)` (sincroniza o `<select>`, já
+existia, não dispara nada sozinha) e `aplicarSelecaoMunicipio(id)`
+(a MESMA função que o `change` do dropdown chama — contorno, centralização,
+todos os indicadores Fase 1/2, botão de exportar). Clique fora de MT: só
+atualiza o texto de `#localitySelectorHint` com um aviso, sem quebrar
+nada. `#map { cursor: pointer; }` sinaliza que é clicável (especificidade
+de ID vence o `cursor: grab` do Leaflet). Contorno não acumula —
+`aplicarSelecaoMunicipio` já removia a camada anterior antes desta
+entrada, comportamento herdado de graça.
+
+**Testado**: `curl` direto no endpoint — centroides de Tangará, Cáceres
+e Cuiabá cada um retornando o município certo; o ponto exato na
+fronteira Cuiabá/Várzea Grande confirmando `intersects` (Várzea Grande,
+via `.first()`) onde `contains` teria dado `null`; um ponto fora de MT
+(São Paulo capital) devolvendo `null` com HTTP 200 (não erro); parâmetros
+inválidos devolvendo 400. Equivalência clique↔dropdown confirmada por
+inspeção de código (não só pela simetria de design): os dois caminhos
+convergem na mesma chamada `aplicarSelecaoMunicipio(id)`, sem branch
+divergente em nenhum dos dois. `manage.py check` limpo, JS revalidado
+com `node --check`.
+
+## 2026-09-01 (continuação 3) — Exportação de dados (.xlsx) por município, pública, com metadados e citação CHIRPS
+
+**Contexto:** pedido do usuário, fora do roadmap — dar reprodutibilidade
+científica e utilidade pública real aos indicadores da home: um botão
+"Exportar dados" que baixa tudo (dado bruto + indicadores calculados +
+metadados/citação) num arquivo só, pra pesquisador/gestor reusar fora
+da plataforma. Plano (7 abas) revisado e aprovado pelo usuário antes de
+codar.
+
+**`climate/municipio_exports.py`** (novo, espelha `farms/exports.py`
+da Etapa 11 — `openpyxl` já dependência, zero lib nova): 7 abas —
+Metadados (fonte CHIRPS, resolução ~0,05°/~5km, cobertura desde 1981,
+município/UF/código IBGE/centroide, período dos dados, data de
+extração, **citação recomendada** — Funk et al. 2015, Scientific Data
+— e nota de extração via GEE), Resumo (Indicadores Atuais — snapshot
+de tudo que a home mostra hoje, sem recalcular), Precipitação Diária
+(série bruta completa, ~16.649 linhas), SPI (4 escalas, ~2.171 linhas),
+Climatologia Mensal (12 linhas), Indicadores Anuais (1 linha por ano —
+total, dias chuvosos nos 3 limiares, intensidade, veranico máximo,
+juntos numa tabela só), e Tendências (Mann-Kendall + Sen's Slope — os
+4 testes já feitos, com S/Z/p-valor/significância completos, não só o
+slope).
+
+**Adição pequena aprovada**: coluna "Interpretação" na aba de
+Tendências, com a mesma frase honesta que já aparece nos gráficos da
+home (achado significativo nomeia a direção; não-significativo nunca
+finge que é). Implementada como reuso de verdade, não duplicação —
+`climate.municipio_indicators.interpretar_tendencia` (novo, público)
+é a MESMA lógica que `renderizarDestaqueTendencia` (JS) já usava,
+promovida a uma função Python única reaproveitada aqui. A versão JS
+continua existindo à parte (navegador não roda Python) — duplicação
+inevitável entre as duas linguagens, mas não entre dois lugares no
+mesmo lado do sistema.
+
+**Endpoint**: `GET /api/municipios/<id>/exportar/` — devolve o `.xlsx`
+direto (`HttpResponse` + `Content-Disposition`, mesma técnica de
+`farms/views.py` da Etapa 11), nome
+`CHIRPS_<município-slug>_<UF>_<AAAAMMDD>.xlsx`. Município sem nenhum
+`ChirpsData` devolve 404 em texto simples ANTES de gerar qualquer
+workbook — nunca um `.xlsx` vazio/quebrado.
+
+**Frontend**: botão "Exportar dados" no cabeçalho da seção de
+indicadores (FASE 1) — desabilitado (`disabled`, `aria-disabled`) até
+`renderizarIndicadoresClimaticos` confirmar que o município tem CHIRPS
+(mesmo fetch que a seção já faz, sem chamada extra), aí vira um link
+direto pro endpoint — o navegador baixa via `Content-Disposition`
+nativo, sem `fetch`/blob no JS.
+
+**Bug pego no teste, corrigido antes de mandar o arquivo**: o nome da
+aba de tendências ("Tendências (Mann-Kendall + Sen's Slope)", 40
+caracteres) excedia o limite de 31 caracteres do Excel — `openpyxl`
+avisou (`UserWarning`) na geração. Encurtado pra "Tendências
+(Mann-Kendall)" (26 caracteres); revalidado que todas as 7 abas ficam
+dentro do limite.
+
+**Testado**: gerado e inspecionado o arquivo de Cáceres de ponta a
+ponta (`load_workbook` de volta, conferindo linha a linha) — os 4
+resultados de tendência batem exatamente com os já validados nas
+entradas anteriores (total −4,0149 mm/ano p=0,0113 sig.; dias chuvosos
+−0,4 dias/ano p=0,0102 sig.; intensidade −0,0054 p=0,475 "Estável";
+veranico +0,2778 dias/ano p=0,0049 sig., "aumento"). Endpoint testado
+via `curl` (headers corretos, `Content-Disposition`) e com
+Adamantina/SP (sem CHIRPS): 404 em texto, não um arquivo quebrado.
+`manage.py check` limpo, JS revalidado com `node --check`.
+
+**Contexto:** os p-valores calculados na entrada anterior (veranico e
+dias chuvosos) ainda não apareciam na home — só a série bruta. Pedido
+explícito do usuário, com 3 regras de comunicação: nunca dar a
+entender tendência onde o teste não sustenta; nomear "não
+significativo" quando for o caso (dias chuvosos); tratar "estável" como
+resultado, não como ausência (intensidade).
+
+**Backend** (`climate/municipio_indicators.py`) — `dias_chuvosos_serie_anual`
+e `veranico_maximo_serie_anual` mudaram de forma (`{ano: valor}` direto
+→ `{"serie": {...}, "tendencia": {...} ou None}`, mesmo formato que
+`intensidade_serie_anual` já usava desde a entrada anterior) — cada
+limiar de dias chuvosos (1/5/10mm) ganha sua PRÓPRIA tendência
+(reaproveita `_tendencia_de_serie`, já genérico). Único consumidor
+dessas duas funções era `api/views.py:municipio_series_anuais`
+(conferido via grep antes de mexer) — atualizado junto. Revalidado
+contra os p-valores já calculados na entrada anterior antes de seguir
+pro frontend: bateram exatamente (Cáceres dias chuvosos p=0,0102,
+veranico p=0,0049).
+
+**Frontend** — `renderizarDestaqueTendencia(elementoId, t, unidade, rotulos)`,
+uma função só reaproveitada nos 3 gráficos de evolução (veranico, dias
+chuvosos, intensidade), decide entre 3 textos possíveis a partir de
+`significativo`+`direcao`:
+1. Significativo (aumento OU redução): nomeia a direção + slope + p-valor,
+   cor correspondente (mesma paleta do card de tendência do total anual —
+   azul/vermelho/cinza).
+2. Não significativo, indicador onde "estável" é a leitura natural
+   (intensidade): "Estável — sem tendência estatisticamente
+   significativa (p=X)".
+3. Não significativo, indicador onde a direção observada ainda merece
+   ser nomeada sem prometer significância (dias chuvosos): "Tendência
+   de redução, NÃO estatisticamente significativa (p=X)".
+
+**Testado nos 3 municípios contra o texto REAL que cada painel vai
+mostrar** (réplica fiel da função extraída do arquivo, rodada contra o
+endpoint ao vivo, não só o cálculo isolado):
+
+- Veranico — os 3 municípios caem no caso 1 (significativo, aumento):
+  "Tendência de aumento estatisticamente significativa: +0,265
+  dias/ano (Mann-Kendall, p=0,003)" (Tangará), análogo em Cáceres
+  (p=0,005) e Cuiabá (p=0,013).
+- Dias chuvosos — Tangará e Cáceres caem no caso 1 (significativo,
+  redução); Cuiabá cai no caso 3: "Tendência de redução, NÃO
+  estatisticamente significativa (p=0,083)" — nem esconde a direção
+  observada, nem finge significância que não existe.
+- Intensidade — os 3 caem no caso 2: "Estável — sem tendência
+  estatisticamente significativa (p=0,475)" (Cáceres) e equivalentes.
+
+`manage.py check` limpo, JS revalidado com `node --check`.
+
+**Contexto:** a entrada anterior mostrou intensidade sem tendência
+significativa nos 3 municípios, e só uma observação visual (não
+testada) de que o veranico máximo parecia crescer em Cáceres. Rodado
+agora, sem mudança de código — só `mi._tendencia_de_serie` (já
+genérico desde a entrada anterior) aplicado às séries de
+`veranico_maximo_serie_anual` e `dias_chuvosos_serie_anual` dos 3
+municípios piloto.
+
+**Veranico máximo anual — significativo nos 3, sem exceção:**
+Tangará da Serra (slope +0,265 dias/ano, p=0,0034), Cáceres (+0,278,
+p=0,0049), Cuiabá (+0,444, p=0,0133). Magnitude grande: os três
+praticamente dobraram o veranico máximo típico entre os 5 primeiros e
+os 5 últimos anos da série (ex.: Cáceres 22,8→44,8 dias).
+
+**Dias chuvosos anuais — significativo em 2 dos 3:** Tangará
+(slope −0,400 dias/ano, p=0,0268) e Cáceres (−0,400, p=0,0102)
+confirmam formalmente a queda já vista por comparação de médias;
+Cuiabá fica no limite (p=0,083, não significativo a 5%).
+
+**Quadro consolidado dos 4 testes** (total anual, dias chuvosos,
+intensidade, veranico máximo):
+
+| | Tangará | Cáceres | Cuiabá |
+|---|---|---|---|
+| Total anual ↓ | não sig. (p=0,107) | **sig.** (p=0,011) | não sig. (p=0,059) |
+| Dias chuvosos ↓ | **sig.** (p=0,027) | **sig.** (p=0,010) | não sig. (p=0,083) |
+| Intensidade | estável (p=0,922) | estável (p=0,475) | estável (p=0,291) |
+| Veranico máximo ↑ | **sig.** (p=0,0034) | **sig.** (p=0,0049) | **sig.** (p=0,0133) |
+
+**Leitura**: Cáceres é o único caso 4/4 completo isoladamente. Mas o
+achado mais forte da análise inteira é justamente o que menos se
+esperava de antemão — **veranico máximo é o único indicador
+significativo nos 3 municípios sem exceção**, mais robusto até que a
+queda do total anual (que só Cáceres confirma com rigor estatístico).
+A narrativa defensável com o dado atual: o sinal mais sólido de
+mudança no regime pluviométrico de MT não é "chove menos no total",
+é "os períodos secos estão ficando mais longos" — presente e
+significativo nos 3 casos testados.
+
+**Não implementado nesta entrada** (pedido explícito do usuário — só
+os testes, sem mexer em frontend/endpoint): esses p-valores não estão
+expostos na home ainda; os gráficos de evolução já mostram as séries
+brutas (veranico, dias chuvosos), só não com o resultado do teste de
+significância ao lado. Registrado como possível próximo passo.
+
+## 2026-09-01 — Evolução temporal (45 anos) dos indicadores de FASE 2 + achado: sem intensificação significativa em MT (nos 3 municípios testados)
+
+**Contexto:** os cards da FASE 2 (entrada anterior) só mostravam o valor
+mais recente. Pedido do usuário: gráfico de evolução ano a ano
+(1981→2025) pra dias chuvosos, intensidade e veranico máximo, cada um
+atrás de um botão "ver evolução" — mesmo padrão do gráfico do SPI.
+
+**Backend** (`climate/municipio_indicators.py`) — 2 refactors sem
+mudança de comportamento (revalidados: `tendencia_mann_kendall` de
+Tangará/Cáceres bateu exatamente com os valores já vistos antes do
+refactor) + 3 funções novas:
+- `_maior_sequencia_em_lista` extraído de `_maior_sequencia_seca` (o
+  núcleo do cálculo de veranico, já corrigido na entrada anterior) —
+  reaproveitado pela série anual sem duplicar a lógica corrigida.
+- `_tendencia_de_serie(anos, valores)` extraído de
+  `tendencia_mann_kendall` — Mann-Kendall/Sen's slope agora genérico
+  pra qualquer série anual, não só o total de chuva.
+- `_registros_diarios_todos_anos(municipio)`: uma query só (todo o
+  histórico diário), agrupada em Python por ano civil completo — base
+  compartilhada das 3 séries novas (evita 45 queries por indicador).
+- `dias_chuvosos_serie_anual`, `intensidade_serie_anual` (inclui a
+  tendência **da própria intensidade**, via `_tendencia_de_serie` —
+  independente da tendência do total anual), `veranico_maximo_serie_anual`
+  (reinicia a contagem em cada 1º de janeiro, mesmo critério calendário
+  fechado dos outros indicadores anuais).
+
+**Endpoint novo**: `GET /api/municipios/<id>/series-anuais/` — as 3
+séries juntas (compartilham a query base), buscado **sob demanda**
+(só no 1º clique em "ver evolução", mesmo padrão lazy do `spi-serie/`)
+— não entra no payload inicial de `indicadores-fase2/`. Testado com
+Adamantina/SP (sem CHIRPS): HTTP 200, tudo `null`.
+
+**Frontend**: 4 botões "ver evolução" na seção FASE 2 — Dias Chuvosos
+(barras, alterna limiar 1/5/10mm sem nova requisição — os 3 já vêm na
+mesma resposta), Intensidade (linha + reta de Sen's slope tracejada
+sobreposta, mesmo estilo do gráfico de tendência anual), Dias Secos
+Consecutivos (barras do máximo por ano), e um 4º gráfico — **sugestão
+aprovada pelo usuário**, "Ver assinatura: Frequência × Intensidade":
+eixo duplo (Chart.js nativo, sem lib nova) combinando as duas séries
+já buscadas num gráfico só, revelando se o padrão é "chove menos vezes
+porém mais forte" ou o oposto. As 4 séries são buscadas uma vez só
+(cache client-side) e reaproveitadas por todos os botões, inclusive o
+combinado.
+
+**ACHADO — testado nos 3 municípios, não confirma a hipótese de
+intensificação**: nenhum dos três (Tangará da Serra, Cáceres, Cuiabá)
+mostrou tendência de intensidade estatisticamente significativa, em
+nenhuma direção:
+
+| Município | Slope intensidade (mm/dia-chuvoso/ano) | p-valor | Significativo? |
+|---|---|---|---|
+| Tangará da Serra | +0,0010 | 0,922 | Não |
+| Cáceres | −0,0054 | 0,475 | Não |
+| Cuiabá | −0,0125 | 0,291 | Não |
+
+Ou seja: em nenhum dos três a chuva está ficando mais intensa por
+evento (nem menos, de forma estatisticamente robusta) — os slopes são
+praticamente nulos. O que os dados MOSTRAM (com a mesma consistência
+já vista no total anual) é queda na **frequência**: dias chuvosos
+caindo em todos os três (Cáceres: média de 176/ano nos 5 primeiros
+anos → 152/ano nos 5 últimos; padrão parecido em Tangará e Cuiabá — já
+registrado na entrada FASE 1/tendência anterior). A leitura defensável
+com o dado atual é "menos dias de chuva explicam a queda do total, não
+intensificação dos eventos individuais" — o oposto da hipótese de
+"chove menos vezes mas mais forte" que motivou o gráfico combinado. Um
+achado real e honesto, ainda que diferente do esperado — registrado
+aqui em vez de forçar uma narrativa que o dado não sustenta.
+
+**Achado secundário, não testado formalmente**: o veranico máximo por
+ano de Cáceres mostra um padrão visual crescente nos anos recentes
+(16-27 dias nos primeiros 5 anos da série vs. 32-66 dias nos últimos
+5) — mas isso é uma observação visual da série bruta, **sem teste de
+significância aplicado** (Mann-Kendall não foi rodado pra veranico
+nesta entrada, só pra total anual e intensidade). Vale investigar
+formalmente numa entrada futura se for do interesse da dissertação.
+
+## 2026-08-31 (continuação 5) — FASE 2 dos indicadores por município: veranico, dias chuvosos, intensidade, recordes, tendência (Mann-Kendall + Sen's slope)
+
+**Contexto:** FASE 1 (SPI, climatologia, anomalia, percentil, acumulados
+— entradas anteriores) validada. FASE 2 adiciona os indicadores que
+faltavam do pedido original: veranico, dias chuvosos, intensidade da
+chuva, recordes históricos, e tendência de longo prazo — agora com
+Mann-Kendall + Sen's slope em vez da regressão linear simples
+(`climate.trends.tendencia_anual`, que **continua existindo**, não foi
+removida nem alterada).
+
+**Refactor prévio em `climate/trends.py`** (pra recordes não duplicar
+query): `normais_climatologicas_mensais` agregava totais por mês
+individual e SÓ DEPOIS agrupava por mês do calendário — extraí a
+primeira parte pra uma função nova e pública, `totais_mensais(municipio)`
+(dict `{date: total_mm}`, um por mês da série toda), que
+`normais_climatologicas_mensais` agora consome. Zero mudança de
+comportamento (validado: `climatologia_mensal` de Tangará bateu
+exatamente com o valor já visto na entrada da FASE 1 antes do
+refactor) — só reuso.
+
+**5 funções novas em `climate/municipio_indicators.py`** (mesmo padrão
+da FASE 1: por município, on-the-fly, cache Redis, `None` nunca
+cacheado):
+- `veranico(municipio)` — maior sequência de dias com chuva < 1mm,
+  recente (12 meses) e recorde histórico. Descrito de forma neutra
+  ("dias secos consecutivos"), sem linguagem agronômica prescritiva —
+  decisão explícita do usuário.
+- `dias_chuvosos(municipio, ano=None)` — contagem nos limiares 1/5/10mm,
+  ano civil completo mais recente por padrão.
+- `intensidade_chuva(municipio, ano=None)` — total do ano ÷ dias com
+  chuva >1mm (concentrada vs. distribuída).
+- `recordes(municipio)` — ano/mês mais chuvoso e mais seco já
+  registrados, via `trends.totais_anuais`/`trends.totais_mensais`
+  (só encontra o extremo, nenhum cálculo novo).
+- `tendencia_mann_kendall(municipio)` — ver fórmulas e validação
+  abaixo.
+
+**Bug real encontrado e corrigido durante o teste** (não só "rodou sem
+erro"): `_maior_sequencia_seca` devolvia `inicio: None` sempre, com
+`fim` correto. Causa: a condição de continuação da sequência checava
+só se a DATA era consecutiva à anterior, não se o DIA ANTERIOR também
+era seco — um dia seco logo depois de um dia de chuva contava como
+"continuação" de uma sequência que não existia. Corrigido rastreando
+`dia_anterior_seco` junto com a contiguidade de data; revalidado com 2
+casos controlados (sequência simples e sequência com buraco de dado no
+meio, que não deve encadear através do buraco) antes de rodar em dado
+real de novo.
+
+**Mann-Kendall + Sen's slope** (`climate/municipio_indicators.py`,
+funções privadas `_mann_kendall_s_z_p`/`_sens_slope`) — zero
+dependência nova, nem numpy: `S = Σsign(x_j-x_i)` (todo par i<j),
+`Var(S)` com correção de empates, `Z` com correção de continuidade,
+`p = math.erfc(|Z|/√2)` (stdlib resolve a CDF da normal padrão sem
+precisar de `scipy.stats.norm`). Sen's slope = mediana das inclinações
+par a par (Theil-Sen), intercepto = `mediana(y) - slope×mediana(x)`.
+Ver docs/DECISOES.md pra fórmulas completas e a validação com série
+sintética.
+
+**Endpoint novo**: `GET /api/municipios/<id>/indicadores-fase2/`
+(`api/views.py`/`api/urls.py`, mesmo padrão `JsonResponse` dos outros
+5 endpoints do app). Testado com Adamantina/SP (sem CHIRPS): HTTP 200,
+tudo `null`.
+
+**Frontend**: nova subseção "📊 Análise Climática Avançada" abaixo da
+seção FASE 1 em `core/templates/core/index.html` — cards de veranico
+(2), dias chuvosos, intensidade, recordes (ano/mês); destaque colorido
+da tendência (vermelho = redução significativa, azul = aumento
+significativo, cinza = sem significância — mesma lógica de cor
+"condição a destacar" já usada no SPI); gráfico de linha dos totais
+anuais com a reta de Sen's slope sobreposta (2º dataset tracejado,
+Chart.js). Buscado em paralelo ao resto ao selecionar cidade.
+
+**Validação da tendência**: série sintética com slope conhecido
+(1.0/-1.8mm/ano sem ruído) recuperou o slope EXATO; com ruído
+moderado, recuperou próximo do valor real e manteve significância.
+Contra dado real, cross-validado com a regressão linear simples que já
+existia (`tendencia_anual`) — concordância próxima em ambos os
+municípios pilotos: Tangará -3,11 mm/ano (Sen) vs. -3,50 (OLS),
+Cáceres -4,02 (Sen) vs. -3,99 (OLS). Mann-Kendall aí acrescenta
+nuance que a regressão simples não dá: Cáceres tem tendência de
+redução estatisticamente **significativa** (p=0,011), Tangará **não**
+(p=0,107) apesar de um slope de magnitude parecida — a série de
+Tangará tem mais ruído ano a ano, então a mesma inclinação não passa
+no teste de significância. Comparação com a média bruta dos 5
+primeiros vs. 5 últimos anos confirma a mesma direção de queda nos
+dois municípios.
+
+## 2026-08-31 (continuação 4) — Modo "Todas as escalas" no gráfico de evolução do SPI
+
+**Contexto:** o gráfico de evolução (entrada anterior) só mostrava uma
+escala de SPI por vez. O usuário pediu um modo comparativo — as 4
+escalas sobrepostas revelam a dinâmica de uma seca se espalhando (SPI-1
+cai antes do SPI-12, sinal de que o déficit de curto prazo ainda não
+"contaminou" o longo prazo), leitura que a banca da dissertação valoriza.
+
+**Só `core/templates/core/index.html`** — nenhuma mudança de backend
+(o endpoint `spi-serie` já aceitava uma escala por chamada; o modo
+"Todas" só passou a chamá-lo 4 vezes, reaproveitando o cache por
+escala que já existia).
+
+- Botão "Todas" no mesmo grupo dos 4 botões de escala.
+  `carregarEDesenharSpiEvolucao` busca em paralelo (`Promise.all`) só
+  as escalas ainda não cacheadas — trocar entre "SPI-3" e "Todas" não
+  rebusca o que já foi visto.
+- 4 linhas, cores da paleta Okabe-Ito (segura pra daltonismo),
+  escolhidas pra não colidir com as faixas de fundo azul/vermelho do
+  modo individual: SPI-1 laranja `#E69F00`, SPI-3 verde-azulado
+  `#009E73`, SPI-6 roxo-avermelhado `#CC79A7`, SPI-12 cinza-escuro
+  `#343a40`. Linhas mais finas (`borderWidth: 1.5` vs. `2` no modo
+  individual) pra não virar borrão.
+- Legenda (Chart.js) só aparece no modo "Todas" — no modo de escala
+  única continua desligada (uma linha não precisa de legenda).
+- **Faixas de fundo REMOVIDAS no modo "Todas"** (decisão confirmada
+  com o usuário antes de codar, não só "mais discretas") — com 4
+  linhas sobrepostas cruzando ±1 em momentos diferentes, a faixa vira
+  ruído; o valor do modo comparativo é a defasagem ENTRE escalas, não
+  a reclassificação contra o limiar. O modo de escala única manteve as
+  faixas exatamente como estavam.
+- Eixo X é a união ordenada das datas das 4 séries (não só a da
+  primeira escala) — protege contra desalinhamento se uma escala
+  tiver histórico disponível mais curto que outra (`spanGaps: true`
+  nos datasets, `null` nos pontos sem dado daquela escala naquela
+  data).
+- Botões de período (5/10/Tudo) continuam funcionando igual, refiltrando
+  as 4 séries em cache sem nova requisição.
+
+**Testado**: simulei a lógica de união/alinhamento em Node contra os 4
+endpoints reais (Tangará, período padrão de 10 anos) — 119 rótulos de
+mês no eixo X, **as 4 escalas com 119 pontos não-nulos cada, zero
+lacuna** no período padrão (SPI-12 já tem histórico suficiente bem
+antes de 2016, então nenhuma escala fica "atrasada" nesse recorte).
+`manage.py check` limpo, bloco `<script>` revalidado com `node --check`.
+
+## 2026-08-31 (continuação 3) — Dois ajustes na seção de indicadores: anomalia mais clara + gráfico de evolução do SPI
+
+**Ajuste 1 — anomalia percentual enganosa em mês seco.** O card de
+anomalia (entrada anterior) destacava só o percentual (ex.: "101% da
+média"). Em mês seco (jul/MT, média histórica ~12,9 mm), um percentual
+perto de 100% de um valor quase nulo passa impressão de normalidade
+que o número absoluto (+0,1 mm) desmente. Correção só em
+`core/templates/core/index.html` (frontend, `anomalia_mensal` já
+devolvia todos os campos usados): absoluto e percentual agora lado a
+lado, mesmo peso visual (`.anomalia-dupla`), e nota discreta em itálico
+quando `media_historica_mm < 30` ("valores baixos típicos do período
+seco — variação percentual pouco representativa").
+
+**Ajuste 2 — gráfico de evolução do SPI.** Endpoint novo
+`GET /api/municipios/<id>/spi-serie/?escala=N` (`api/views.py`/
+`api/urls.py`, mesmo padrão `JsonResponse` dos outros 4 endpoints do
+app — `escala` fora de `(1,3,6,12)` devolve 400) repassa
+`municipio_indicators.spi_serie` sem recalcular nada; filtro de
+período (5/10 anos/tudo) fica no frontend por decisão explícita — a
+série inteira (≤ ~545 pontos mensais) já é pequena e já vem cacheada,
+recortar um array não justificava lógica nova no backend.
+
+Botão "Ver evolução do SPI" abaixo dos 4 cards, painel escondido por
+padrão (`display: none`) até o clique. Dentro: botões de escala
+(1/3/6/12, padrão SPI-3) e período (5/10/tudo, padrão 10 anos — troca
+de período só refiltra o array já em cache, sem nova requisição; troca
+de escala busca sob demanda e cacheia por escala, resetado a cada
+município novo escolhido). Gráfico de linha (Chart.js, já usado) com
+faixas de fundo — seca (SPI < -1) e úmido (SPI > +1) — desenhadas por
+um plugin Chart.js **inline** (`beforeDatasetsDraw`, ~15 linhas) em vez
+de trazer `chartjs-plugin-annotation` como dependência nova; zona
+normal (-1 a 1) fica sem preenchimento. Opacidade das faixas bem baixa
+(`rgba(..., 0.06)`) a pedido explícito do usuário — são só contexto de
+leitura, a linha do SPI é a protagonista. Eixo X usa rótulos
+categóricos (string "mmm/aaaa"), não escala de tempo — evita precisar
+do adaptador de datas do Chart.js (mais uma dependência).
+
+Nenhuma mudança em `climate/municipio_indicators.py`, painel privado,
+ou Windy. `manage.py check` limpo; endpoint novo testado via `curl`
+(Tangará/SPI-3: 545 pontos, 1981-03 a 2026-07; escala inválida → 400);
+bloco `<script>` revalidado com `node --check` depois das duas
+mudanças.
+
+## 2026-08-31 (continuação 2) — Indicadores climáticos (FASE 1) na home pública
+
+**Contexto:** primeira etapa da home nova — mostrar os indicadores de
+`climate/municipio_indicators.py` (entrada anterior) pro município
+escolhido no seletor Estado/Cidade que já existia, sem exigir
+fazenda/estação cadastrada.
+
+**Backend** — `api/views.py`/`api/urls.py`, novo endpoint
+`GET /api/municipios/<id>/indicadores/`, mesmo padrão dos 3 endpoints
+vizinhos já existentes nesse app (`JsonResponse` simples — `api/` nunca
+usou DRF apesar de instalado; decisão confirmada com o usuário via
+pergunta direta antes de codar, pra não introduzir um padrão novo só
+pra este endpoint). Só chama as funções de `municipio_indicators.py` e
+serializa — nenhum cálculo novo. Município sem CHIRPS suficiente (fora
+de MT hoje) devolve HTTP 200 com todos os campos `null`/vazios, nunca
+500 — testado com Adamantina/SP de propósito.
+
+**Frontend** — só `core/templates/core/index.html` (HTML+CSS+JS,
+template monolítico, mesmo padrão do resto do arquivo): nova seção
+"Indicadores Climáticos Históricos" entre "Previsão de 7 Dias" e o
+iframe do Windy — separa clima agora/previsão (Open-Meteo) de clima
+histórico (CHIRPS) antes do radar em tempo real. Disparada de dentro
+de `aplicarSelecaoMunicipio()` (mesmo hook que já carregava o clima
+Open-Meteo ao escolher cidade), sem tocar na mecânica existente.
+
+- **4 cards de SPI** (1/3/6/12, as quatro — não só 3/6, pedido
+  explícito do usuário), rótulo curto do horizonte de cada escala
+  ("SPI-1 · último mês" ... "SPI-12 · ano"). Cor por CLASSIFICAÇÃO,
+  não por escala — escala simétrica de verdade: verde só pra `normal`,
+  amarelo→laranja→vermelho conforme a seca piora, azul claro→escuro
+  conforme o excesso de chuva aumenta. Excesso de chuva NÃO usa verde
+  (ajuste pedido depois do plano inicial — tratar excesso como "bom"
+  esconderia uma condição que também merece destaque).
+- Cards de anomalia mensal e percentil histórico (frase "Nº mais seco
+  desde ANO" montada no frontend a partir dos campos que o endpoint já
+  devolve prontos).
+- Gráfico de barras da climatologia mensal (Chart.js 4.4.4 via CDN —
+  mesma versão já usada em `dashboard/painel.html`, Etapa 8.1, sem
+  dependência nova).
+- Cards de acumulados 7/30/90 dias, "aguardando dado" quando `null`
+  (caso atual das janelas de 7/30 dias, CHIRPS parado em 2026-07-31 —
+  lag normal de publicação, já diagnosticado na entrada anterior).
+- Município sem CHIRPS: um aviso único substitui a seção inteira, sem
+  tentar desenhar 4 cards vazios e um gráfico sem dado.
+
+Windy/Open-Meteo não foram tocados — seção CHIRPS só foi adicionada.
+Nada em `dashboard/`, `farms/` ou painel privado mudou.
+
+**Testado**: `manage.py check` limpo; endpoint testado via `curl` com 3
+municípios reais (Tangará da Serra, Cáceres, Cuiabá — JSON completo,
+todos os campos populados) e 1 sem CHIRPS (Adamantina/SP — HTTP 200,
+tudo `null`, sem erro); bloco `<script>` extraído do template e
+validado com `node --check` (sintaxe JS limpa) — sem navegador
+disponível nesta sessão pra clique-a-clique visual completo.
+
+## 2026-08-31 (continuação) — Indicadores climáticos por município (climate/municipio_indicators.py)
+
+**Contexto:** investigação prévia (pedida antes de codar) mostrou que
+`spi.services.calcular_serie_spi` já calculava por MUNICÍPIO desde a
+Etapa 7.1 — só a gravação em `SpiResult` amarrava a estação. Com o
+CHIRPS dos 142 municípios de MT já importado, deu pra expor esse
+cálculo (e o de `climate/trends.py`, que já era por-município) num
+módulo novo, reaproveitável tanto pela home pública (município
+clicado no mapa, sem fazenda) quanto pelo painel privado no futuro.
+
+**O que foi feito** — `climate/municipio_indicators.py` (novo), 6
+funções públicas, todas recebendo `municipio` (objeto ou
+`codigo_ibge`), zero model/migration:
+- `spi_serie`/`spi_atual` (SPI-1/3/6/12) — repassa pra
+  `spi.services.calcular_serie_spi`. SPI-1 exigiu adicionar `1` a
+  `spi/services.py:ESCALAS_VALIDAS` (cálculo já suportava, só a
+  validação bloqueava) — não mexe em `SpiResult` nem em
+  `calcular_spi`, que continuam só 3/6/12.
+- `climatologia_mensal` — repassa pra
+  `climate.trends.normais_climatologicas_mensais`.
+- `anomalia_mensal` — nova: chuva do mês vs. média histórica do mesmo
+  mês do calendário (ano avaliado excluído da própria média).
+- `percentil_historico_mensal` — nova: onde a chuva do mês se
+  posiciona no histórico (percentil 0-100 + posição ordinal "Nº mais
+  seco/chuvoso desde ANO").
+- `acumulados_municipio` — nova: 7/30/90 dias, só CHIRPS (sem misturar
+  com dado local de fazenda — isso continua em
+  `dashboard.services.acumulados`, não tocado).
+- Cache Redis opcional (`CACHE_HABILITADO`, flag de módulo fácil de
+  desligar), TTL 1 dia, resultado `None` nunca cacheado.
+
+**Testado**: 3 municípios (Tangará da Serra, Cáceres, Cuiabá) × 6
+funções, primeiro sem cache (valor cru conferido), depois com cache
+(hit confirmado fisicamente no Redis, 20ms → <1ms, resultado
+idêntico). Achado à parte, não é bug: `acumulados_municipio` retornou
+`chirps_mm: None` pras janelas de 7 e 30 dias nos 3 municípios — o
+CHIRPS mais recente no banco é 2026-07-31, e hoje é 2026-08-31 (mês
+inteiro sem cobertura ainda, publicação do CHIRPS tem defasagem
+própria); a janela de 90 dias já alcança dado real e voltou valor
+normal nos 3 casos. Detalhe completo da decisão de arquitetura em
+docs/DECISOES.md.
+
+**Pendente, registrado a pedido do usuário**: FASE 2 (veranicos, dias
+chuvosos, intensidade da chuva, recordes, tendência de longo prazo)
+fica pra depois da validação da FASE 1. Já decidido pra quando chegar:
+a tendência de longo prazo vai usar **Mann-Kendall + Sen's slope**
+(testa significância estatística, padrão pra séries climáticas) em
+vez da regressão linear simples que `climate/trends.py:tendencia_anual`
+usa hoje — `tendencia_anual` não foi alterado nesta entrada.
+
+## 2026-08-31 — Rebranding visível: "GeoClima MT" → "MonitorChuva MT"
+
+**Contexto:** pedido explícito do usuário — trocar só o nome que o
+usuário FINAL vê na tela (título de aba, navbar, rodapé, e-mails),
+sem tocar em nada interno (containers `geoclima_web`/`geoclima_db`,
+nome do projeto Django `geoclima`, banco, variáveis de ambiente,
+domínio, nomes de apps/models/arquivos `.py`).
+
+**O que foi feito:** troca de texto em 22 templates — os dois layouts
+base (`templates/base.html`, usado pelas páginas de auth/painel, e
+`core/templates/core/index.html`, a Home pública, que não estende
+`base.html`) tiveram `<title>`, navbar-brand (emoji 🌍 → 🌧️) e rodapé
+(`© 2026 ...`) trocados; os outros 20 templates só tinham
+`{% block title %}... — GeoClima MT{% endblock %}`, trocado em massa.
+Também `core/templates/core/ajuda.html` (H1 da página), 3 ocorrências
+em `farms/templates/farms/relatorio_fazenda.html` (`<title>`,
+subtítulo do cabeçalho, rodapé do relatório impresso) e os textos dos
+e-mails de recuperação de senha (`accounts/templates/accounts/
+password_reset_email.html`, `password_reset_subject.txt`).
+
+**Subtítulo novo** ("Monitoramento de precipitação e índice de seca
+em Mato Grosso") só entrou na Home — único lugar com navbar espaçosa o
+bastante pra caber uma segunda linha sem forçar; as páginas que usam
+`base.html` mantiveram a navbar de uma linha só, sem subtítulo, pra
+não repetir a mesma frase em toda página do painel.
+
+**O que NÃO foi tocado** (deliberado, confirmado depois via `grep
+-r "GeoClima"`): containers Docker, `settings.py` (só tinha um
+comentário interno citando "GeoClima MT", não texto exibido),
+`Dockerfile`, e os arquivos de documentação (`README.md`, `CLAUDE.md`,
+`docs/*.md`, `requisitos/requisitos.md`) — não são tela vista pelo
+usuário final do sistema, e `docs/RELATORIO_TECNICO.md` em particular
+documenta o histórico real do projeto sob o nome que ele tinha à
+época, não faz sentido reescrever retroativamente.
+
+**Testado**: `manage.py check` limpo, HTML renderizado via `curl` na
+Home (navbar com subtítulo) e no login (`base.html`, título/navbar/
+rodapé), `grep -r "🌍"` e `grep -r "GeoClima"` no repo confirmando
+zero ocorrência em template/e-mail — só sobrou em documentação.
+
 ## 2026-08-23 (continuação 22) — Cache do Django trocado pra Redis (produção roda 3 workers do Gunicorn)
 
 **Contexto:** antes de subir a entrada anterior (pipeline climático

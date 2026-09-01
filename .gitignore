@@ -25,3 +25,7 @@ secrets/
 venv/
 .venv/
 env/
+
+# Log de execução do backfill de MT (Etapa fora do roadmap) — artefato de
+# execução local, não código.
+import_mt_log.txt

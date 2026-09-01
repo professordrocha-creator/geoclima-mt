@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GeoClima MT</title>
+    <title>MonitorChuva MT</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
@@ -24,6 +24,9 @@
 
         /* SEÇÃO DO MAPA */
         .map-section { width: 100%; height: 380px; border-radius: 1rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); z-index: 0; }
+        /* Indica que o mapa é clicável (ver handleMapClick) — especificidade
+           de ID vence o cursor "grab" que o Leaflet aplica por classe. */
+        #map { cursor: pointer; }
 
         /* SELETOR DE LOCALIDADE (Estado/Cidade) */
         .locality-selector-card { background-color: #ffffff; border-radius: 1rem; padding: 1.25rem 1.5rem; margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
@@ -49,13 +52,87 @@
         .daily-temp-max { font-weight: 600; color: #dc3545; }
         .daily-temp-min { font-weight: 600; color: #0d6efd; }
 
+        /* INDICADORES CLIMÁTICOS (CHIRPS) */
+        .chirps-indicators-section { background-color: #ffffff; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .chirps-placeholder { color: #6c757d; text-align: center; padding: 1rem 0; }
+        .spi-cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; }
+        /* Escala simétrica: verde = normal, amarelo→laranja→vermelho = seca
+           (piora), azul claro→escuro = úmido/excesso (mais chuva, também
+           destacado — não é "bom" por padrão). Mesmas 7 classificações de
+           spi/models.py:SpiResult.CLASSIFICATIONS. */
+        .spi-card { border-radius: 0.8rem; padding: 1rem; text-align: center; color: #fff; transition: transform 0.3s ease; }
+        .spi-card:hover { transform: translateY(-4px); }
+        .spi-card .spi-escala-label { font-size: 0.75rem; opacity: 0.9; margin-bottom: 0.2rem; }
+        .spi-card .spi-valor { font-size: 1.6rem; font-weight: 700; }
+        .spi-card .spi-classificacao { font-size: 0.8rem; font-weight: 600; margin-top: 0.2rem; }
+        .spi-card .spi-sem-dado { font-size: 1.1rem; font-weight: 600; opacity: 0.85; }
+        .spi-extremamente_umido { background-color: #023e8a; }
+        .spi-muito_umido { background-color: #0077b6; }
+        .spi-moderadamente_umido { background-color: #48cae4; color: #1a1a1a; }
+        .spi-normal { background-color: #2b9348; }
+        .spi-seca_moderada { background-color: #ffc107; color: #1a1a1a; }
+        .spi-seca_severa { background-color: #fd7e14; }
+        .spi-seca_extrema { background-color: #dc3545; }
+        .spi-sem-classificacao { background-color: #adb5bd; }
+
+        .chirps-info-card { background-color: #f8f9fa; border-radius: 0.8rem; padding: 1rem 1.25rem; height: 100%; }
+        .chirps-info-card .chirps-info-title { font-size: 0.85rem; color: #6c757d; margin-bottom: 0.4rem; font-weight: 600; }
+        .chirps-info-card .chirps-info-valor { font-size: 1.3rem; font-weight: 700; color: #343a40; }
+        .chirps-info-card .chirps-info-detalhe { font-size: 0.85rem; color: #6c757d; margin-top: 0.2rem; }
+        /* Anomalia: absoluto e percentual lado a lado, MESMO peso visual —
+           só o percentual em destaque é enganoso em mês seco (ex: 101% de
+           quase-nada ainda é quase-nada). */
+        .anomalia-dupla { display: flex; gap: 1.5rem; }
+        .anomalia-item { flex: 1; }
+        .anomalia-item-valor { font-size: 1.3rem; font-weight: 700; color: #343a40; }
+        .anomalia-item-label { font-size: 0.75rem; color: #6c757d; }
+        .chirps-nota-discreta { font-size: 0.78rem; color: #6c757d; font-style: italic; margin-top: 0.5rem; }
+
+        /* EVOLUÇÃO DO SPI (gráfico de linha, escondido por padrão) */
+        .spi-evolucao-toggle-wrap { text-align: center; }
+        .spi-evolucao-painel { background-color: #f8f9fa; border-radius: 0.8rem; padding: 1rem; margin-top: 1rem; }
+        .spi-evolucao-controles { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+
+        .chirps-chart-container canvas { max-height: 280px; }
+
+        .acumulados-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; }
+        .acumulado-card { background-color: #f8f9fa; border-radius: 0.8rem; padding: 0.8rem; text-align: center; }
+        .acumulado-card .acumulado-dias { font-size: 0.8rem; color: #6c757d; }
+        .acumulado-card .acumulado-valor { font-size: 1.2rem; font-weight: 700; color: #343a40; }
+
+        /* ANÁLISE CLIMÁTICA AVANÇADA (FASE 2) */
+        .fase2-cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+        .fase2-card { background-color: #f8f9fa; border-radius: 0.8rem; padding: 1rem 1.25rem; }
+        .fase2-card .fase2-card-titulo { font-size: 0.85rem; color: #6c757d; font-weight: 600; margin-bottom: 0.3rem; }
+        .fase2-card .fase2-card-valor { font-size: 1.3rem; font-weight: 700; color: #343a40; }
+        .fase2-card .fase2-card-detalhe { font-size: 0.8rem; color: #6c757d; margin-top: 0.2rem; }
+
+        .tendencia-destaque { border-radius: 0.8rem; padding: 1.25rem 1.5rem; }
+        .tendencia-destaque .tendencia-titulo { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; opacity: 0.85; }
+        .tendencia-destaque .tendencia-valor { font-size: 1.6rem; font-weight: 700; }
+        .tendencia-destaque .tendencia-detalhe { font-size: 0.88rem; margin-top: 0.4rem; }
+        /* Mesma lógica de cor das faixas do SPI: vermelho = redução, azul =
+           aumento, cinza-neutro = sem significância estatística — só
+           colore como "condição a destacar" quando o teste confirma. */
+        .tendencia-significativa-reducao { background-color: #fdece9; color: #842029; }
+        .tendencia-significativa-aumento { background-color: #e7f1ff; color: #0a3878; }
+        .tendencia-sem-significancia { background-color: #f8f9fa; color: #495057; }
+
+        /* Versão compacta do destaque de tendência, usada nos 3 gráficos
+           de evolução (veranico/dias chuvosos/intensidade) — mesmas
+           classes de cor acima, só menor pra caber acima do gráfico. */
+        .tendencia-destaque-mini { border-radius: 0.6rem; padding: 0.6rem 1rem; margin-bottom: 0.75rem; font-size: 0.85rem; }
+
     </style>
 </head>
 <body>
     <!-- NAVBAR -->
     <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">🌍 GeoClima MT</a>
+            <a class="navbar-brand d-flex flex-column lh-sm" href="#">
+                <span>🌧️ MonitorChuva MT</span>
+                <small class="text-white-50 d-none d-sm-inline" style="font-size: 0.65rem; font-weight: 400;">Monitoramento de precipitação e índice de seca em Mato Grosso</small>
+            </a>
             <div class="ms-auto">
                 <a href="{% url 'ajuda' %}" class="btn btn-outline-light btn-sm text-white me-2">❓ Ajuda</a>
                 {% if user.is_authenticated %}
@@ -188,6 +265,43 @@
             </div>
         </div>
 
+        <!-- BLOCO: INDICADORES CLIMÁTICOS (CHIRPS) -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="chirps-indicators-section">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                        <h5 class="fw-bold mb-0" style="color: #1a1a1a;">🌧️ Indicadores Climáticos Históricos</h5>
+                        <div class="d-flex align-items-center gap-2">
+                            <small class="text-muted">Dados de precipitação: CHIRPS</small>
+                            <a id="exportarDadosBtn" class="btn btn-sm btn-outline-success disabled" href="#"
+                               title="Escolha uma cidade com dado CHIRPS disponível" tabindex="-1" aria-disabled="true">
+                                <i class="fas fa-file-excel"></i> Exportar dados
+                            </a>
+                        </div>
+                    </div>
+                    <div id="chirpsIndicatorsContent">
+                        <p class="chirps-placeholder">Escolha uma cidade acima para ver os indicadores climáticos históricos do município.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BLOCO: ANÁLISE CLIMÁTICA AVANÇADA (FASE 2 — veranico, dias
+             chuvosos, intensidade, recordes, tendência de longo prazo) -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="chirps-indicators-section">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                        <h5 class="fw-bold mb-0" style="color: #1a1a1a;">📊 Análise Climática Avançada</h5>
+                        <small class="text-muted">Dados de precipitação: CHIRPS</small>
+                    </div>
+                    <div id="chirpsFase2Content">
+                        <p class="chirps-placeholder">Escolha uma cidade acima para ver a análise climática avançada do município.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- NOVO BLOCO: RADAR METEOROLÓGICO -->
         <div class="row mt-4 mb-4">
             <div class="col-12">
@@ -208,6 +322,7 @@
     <!-- SCRIPTS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script>
         // Mapeamento de weather_code para textos e ícones (duplicado para frontend e backend para segurança)
         const WEATHER_CODE_MAPPING = {
@@ -466,6 +581,10 @@
                     attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
                     maxZoom: 19,
                 }).addTo(map);
+
+                // Clicar/tocar no mapa faz o mesmo que escolher a cidade no
+                // dropdown — ver handleMapClick.
+                map.on("click", (e) => handleMapClick(e.latlng.lat, e.latlng.lng));
             }
             catch (error) {
                 console.error("Erro ao inicializar o mapa Leaflet:", error);
@@ -598,6 +717,1065 @@
             return option;
         }
 
+        // ==================== INDICADORES CLIMÁTICOS (CHIRPS) ====================
+        let climatologiaChartInstance = null;
+
+        // Estado do gráfico de evolução do SPI — sempre do município
+        // ATUALMENTE exibido (resetado a cada renderizarIndicadoresClimaticos,
+        // pra não misturar série de um município com outro).
+        let municipioIdAtual = null;
+        let spiSerieCacheAtual = {};   // { escala: [{date, value, classification}, ...] }
+        let spiEscalaAtual = 3;
+        let spiAnosAtual = 10;
+        let spiEvolucaoChartInstance = null;
+
+        // Mesmos rótulos de spi/models.py:SpiResult.CLASSIFICATIONS — duplicado
+        // aqui só pra exibição (a fonte da verdade continua o backend).
+        const SPI_LABELS = {
+            extremamente_umido: "Extremamente Úmido",
+            muito_umido: "Muito Úmido",
+            moderadamente_umido: "Moderadamente Úmido",
+            normal: "Normal",
+            seca_moderada: "Seca Moderada",
+            seca_severa: "Seca Severa",
+            seca_extrema: "Seca Extrema",
+        };
+        const MESES_ABREV = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+        // Modo "Todas" do gráfico de evolução do SPI — 4 escalas sobrepostas.
+        const ESCALAS_SPI_TODAS = [1, 3, 6, 12];
+        // Paleta inspirada em Okabe-Ito (segura pra daltonismo), evitando
+        // azul/vermelho saturado — essas cores já são usadas pelas faixas de
+        // fundo seca/úmido do modo de escala única.
+        const CORES_SPI_ESCALA = { 1: "#E69F00", 3: "#009E73", 6: "#CC79A7", 12: "#343a40" };
+
+        async function carregarIndicadoresClimaticos(municipioId) {
+            const container = document.getElementById("chirpsIndicatorsContent");
+            if (!container || !municipioId) return;
+            try {
+                const response = await fetch(`/api/municipios/${municipioId}/indicadores/`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const dados = await response.json();
+                renderizarIndicadoresClimaticos(dados);
+            } catch (error) {
+                console.error("Erro ao carregar indicadores climáticos:", error);
+                container.innerHTML = `<p class="chirps-placeholder">Não foi possível carregar os indicadores climáticos agora.</p>`;
+            }
+        }
+
+        // Botão "Exportar dados" (.xlsx) — fica desabilitado até confirmar
+        // (via /indicadores/ já buscado de qualquer forma) que o município
+        // tem CHIRPS; passar municipioId=null desabilita de novo (município
+        // sem dado suficiente, ou nenhuma cidade escolhida ainda). Link
+        // direto pro endpoint (o navegador baixa via Content-Disposition,
+        // sem precisar de fetch/blob no JS).
+        function configurarBotaoExportar(municipioId) {
+            const btn = document.getElementById("exportarDadosBtn");
+            if (!btn) return;
+            if (municipioId) {
+                btn.href = `/api/municipios/${municipioId}/exportar/`;
+                btn.classList.remove("disabled");
+                btn.removeAttribute("aria-disabled");
+                btn.removeAttribute("tabindex");
+                btn.title = "Baixar dados climáticos deste município em Excel (.xlsx)";
+            } else {
+                btn.href = "#";
+                btn.classList.add("disabled");
+                btn.setAttribute("aria-disabled", "true");
+                btn.setAttribute("tabindex", "-1");
+                btn.title = "Escolha uma cidade com dado CHIRPS disponível";
+            }
+        }
+
+        function renderizarIndicadoresClimaticos(dados) {
+            const container = document.getElementById("chirpsIndicatorsContent");
+            if (!container) return;
+
+            // Município sem CHIRPS suficiente (fora do recorte de dado hoje):
+            // nenhuma escala de SPI tem valor — mostra um aviso único em vez
+            // de 4 cards e um gráfico vazios.
+            const temAlgumSpi = Object.values(dados.spi).some(s => s.value !== null);
+            if (!temAlgumSpi) {
+                container.innerHTML = `<p class="chirps-placeholder">Ainda não há dado CHIRPS suficiente para ${dados.municipio.nome}/${dados.municipio.uf}.</p>`;
+                configurarBotaoExportar(null);
+                return;
+            }
+            configurarBotaoExportar(dados.municipio.id);
+
+            container.innerHTML = `
+                <div class="spi-cards-grid mb-2" id="spiCardsGrid"></div>
+                <div class="spi-evolucao-toggle-wrap mb-3">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="toggleSpiEvolucaoBtn">
+                        <i class="fas fa-chart-line"></i> Ver evolução do SPI
+                    </button>
+                </div>
+                <div class="spi-evolucao-painel" id="spiEvolucaoPainel" style="display: none;">
+                    <div class="spi-evolucao-controles">
+                        <div class="btn-group btn-group-sm" role="group" id="spiEscalaButtons">
+                            <button type="button" class="btn btn-outline-secondary spi-escala-btn" data-escala="1">SPI-1</button>
+                            <button type="button" class="btn btn-outline-secondary spi-escala-btn active" data-escala="3">SPI-3</button>
+                            <button type="button" class="btn btn-outline-secondary spi-escala-btn" data-escala="6">SPI-6</button>
+                            <button type="button" class="btn btn-outline-secondary spi-escala-btn" data-escala="12">SPI-12</button>
+                            <button type="button" class="btn btn-outline-secondary spi-escala-btn" data-escala="todas">Todas</button>
+                        </div>
+                        <div class="btn-group btn-group-sm" role="group" id="spiPeriodoButtons">
+                            <button type="button" class="btn btn-outline-secondary spi-periodo-btn" data-anos="5">5 anos</button>
+                            <button type="button" class="btn btn-outline-secondary spi-periodo-btn active" data-anos="10">10 anos</button>
+                            <button type="button" class="btn btn-outline-secondary spi-periodo-btn" data-anos="0">Tudo</button>
+                        </div>
+                    </div>
+                    <div style="position: relative; height: 280px;">
+                        <canvas id="spiEvolucaoChart"></canvas>
+                    </div>
+                    <p class="chirps-placeholder mb-0" id="spiEvolucaoSemDado" style="display: none;">Histórico insuficiente para esta escala.</p>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-12 col-md-6">
+                        <div class="chirps-info-card" id="anomaliaCard"></div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <div class="chirps-info-card" id="percentilCard"></div>
+                    </div>
+                </div>
+                <div class="chirps-chart-container mb-3">
+                    <h6 class="section-title mb-2">Climatologia Mensal (média histórica, mm)</h6>
+                    <div style="position: relative; height: 280px;">
+                        <canvas id="climatologiaChart"></canvas>
+                    </div>
+                </div>
+                <div class="acumulados-grid" id="acumuladosGrid"></div>
+            `;
+
+            // --- SPI: as 4 escalas sempre nessa ordem, pedido explícito do
+            // usuário (não só 3/6) — cor por classificação, não por escala.
+            const spiGrid = document.getElementById("spiCardsGrid");
+            for (const escala of ["1", "3", "6", "12"]) {
+                const s = dados.spi[escala];
+                const classe = s.classification ? `spi-${s.classification}` : "spi-sem-classificacao";
+                const conteudo = s.value !== null
+                    ? `<div class="spi-valor">${s.value.toFixed(2)}</div><div class="spi-classificacao">${SPI_LABELS[s.classification] || s.classification}</div>`
+                    : `<div class="spi-sem-dado">—</div>`;
+                spiGrid.insertAdjacentHTML("beforeend", `
+                    <div class="spi-card ${classe}">
+                        <div class="spi-escala-label">SPI-${escala} · ${s.rotulo}</div>
+                        ${conteudo}
+                    </div>
+                `);
+            }
+
+            // --- Evolução do SPI (escondida até o clique) ---
+            municipioIdAtual = dados.municipio.id;
+            spiSerieCacheAtual = {};
+            spiEscalaAtual = 3;
+            spiAnosAtual = 10;
+            configurarPainelEvolucaoSpi();
+
+            // --- Anomalia do último mês completo ---
+            // Absoluto e percentual com o MESMO peso visual (não só o
+            // percentual em destaque) — em mês seco, "101% de quase-nada"
+            // ainda é quase-nada, e destacar só o % passa impressão enganosa.
+            const anomaliaCard = document.getElementById("anomaliaCard");
+            const a = dados.anomalia_mensal;
+            if (a) {
+                const sinalAbs = a.anomalia_absoluta_mm >= 0 ? "+" : "";
+                const notaMesSeco = a.media_historica_mm < 30
+                    ? `<div class="chirps-nota-discreta">Valores baixos típicos do período seco — variação percentual pouco representativa.</div>`
+                    : "";
+                anomaliaCard.innerHTML = `
+                    <div class="chirps-info-title">Anomalia de Chuva — ${MESES_ABREV[a.mes - 1]}/${a.ano}</div>
+                    <div class="anomalia-dupla">
+                        <div class="anomalia-item">
+                            <div class="anomalia-item-valor">${sinalAbs}${a.anomalia_absoluta_mm.toFixed(1)} mm</div>
+                            <div class="anomalia-item-label">diferença absoluta</div>
+                        </div>
+                        <div class="anomalia-item">
+                            <div class="anomalia-item-valor">${a.anomalia_percentual.toFixed(0)}%</div>
+                            <div class="anomalia-item-label">da média histórica</div>
+                        </div>
+                    </div>
+                    <div class="chirps-info-detalhe">${a.chuva_mm.toFixed(1)} mm vs. média de ${a.media_historica_mm.toFixed(1)} mm (${a.n_anos_historico} anos)</div>
+                    ${notaMesSeco}
+                `;
+            } else {
+                anomaliaCard.innerHTML = `
+                    <div class="chirps-info-title">Anomalia de Chuva</div>
+                    <div class="chirps-info-valor">—</div>
+                    <div class="chirps-info-detalhe">Histórico insuficiente ainda.</div>
+                `;
+            }
+
+            // --- Percentil histórico do último mês completo ---
+            const percentilCard = document.getElementById("percentilCard");
+            const p = dados.percentil_historico;
+            percentilCard.innerHTML = p ? `
+                <div class="chirps-info-title">Percentil Histórico — ${MESES_ABREV[p.mes - 1]}/${p.ano}</div>
+                <div class="chirps-info-valor">Percentil ${p.percentil.toFixed(0)}</div>
+                <div class="chirps-info-detalhe">${p.posicao_mais_seco}º ${MESES_ABREV[p.mes - 1]} mais seco desde ${p.primeiro_ano_historico} (de ${p.n_anos_historico} anos)</div>
+            ` : `
+                <div class="chirps-info-title">Percentil Histórico</div>
+                <div class="chirps-info-valor">—</div>
+                <div class="chirps-info-detalhe">Histórico insuficiente ainda.</div>
+            `;
+
+            renderizarGraficoClimatologia(dados.climatologia_mensal);
+
+            // --- Acumulados 7/30/90 dias ---
+            const acumuladosGrid = document.getElementById("acumuladosGrid");
+            acumuladosGrid.innerHTML = dados.acumulados.map(item => `
+                <div class="acumulado-card">
+                    <div class="acumulado-dias">${item.dias} dias</div>
+                    <div class="acumulado-valor">${item.chirps_mm !== null ? item.chirps_mm.toFixed(1) + " mm" : "aguardando dado"}</div>
+                </div>
+            `).join("");
+        }
+
+        function renderizarGraficoClimatologia(climatologia) {
+            const canvas = document.getElementById("climatologiaChart");
+            if (!canvas) return;
+
+            const labels = [];
+            const valores = [];
+            for (let mes = 1; mes <= 12; mes++) {
+                const dado = climatologia[String(mes)];
+                labels.push(MESES_ABREV[mes - 1]);
+                valores.push(dado ? Math.round(dado.media * 10) / 10 : null);
+            }
+
+            if (climatologiaChartInstance) {
+                climatologiaChartInstance.destroy();
+            }
+            climatologiaChartInstance = new Chart(canvas, {
+                type: "bar",
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: "Média histórica (mm)",
+                        data: valores,
+                        backgroundColor: "#0d6efd",
+                        borderRadius: 4,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, title: { display: true, text: "mm" } } },
+                },
+            });
+        }
+
+        // --- Evolução do SPI: painel escondido por padrão, botões de
+        // escala (1/3/6/12) e período (5/10/tudo), gráfico de linha com
+        // faixas de fundo pra sinalizar seca/úmido. ---
+        function configurarPainelEvolucaoSpi() {
+            const toggleBtn = document.getElementById("toggleSpiEvolucaoBtn");
+            const painel = document.getElementById("spiEvolucaoPainel");
+            if (!toggleBtn || !painel) return;
+
+            toggleBtn.addEventListener("click", () => {
+                const estaEscondido = painel.style.display === "none";
+                painel.style.display = estaEscondido ? "block" : "none";
+                if (estaEscondido) {
+                    carregarEDesenharSpiEvolucao();
+                }
+            });
+
+            document.querySelectorAll(".spi-escala-btn").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    document.querySelectorAll(".spi-escala-btn").forEach(b => b.classList.remove("active"));
+                    btn.classList.add("active");
+                    spiEscalaAtual = btn.dataset.escala === "todas" ? "todas" : parseInt(btn.dataset.escala, 10);
+                    carregarEDesenharSpiEvolucao();
+                });
+            });
+
+            document.querySelectorAll(".spi-periodo-btn").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    document.querySelectorAll(".spi-periodo-btn").forEach(b => b.classList.remove("active"));
+                    btn.classList.add("active");
+                    spiAnosAtual = parseInt(btn.dataset.anos, 10);
+                    // Só refiltra e redesenha — a série já está em cache,
+                    // trocar o período não precisa buscar de novo no servidor.
+                    desenharGraficoSpiEvolucao();
+                });
+            });
+        }
+
+        async function carregarEDesenharSpiEvolucao() {
+            const escalasNecessarias = spiEscalaAtual === "todas" ? ESCALAS_SPI_TODAS : [spiEscalaAtual];
+            const buscas = escalasNecessarias
+                .filter(escala => !spiSerieCacheAtual[escala])
+                .map(async escala => {
+                    try {
+                        const response = await fetch(`/api/municipios/${municipioIdAtual}/spi-serie/?escala=${escala}`);
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        const dados = await response.json();
+                        spiSerieCacheAtual[escala] = dados.serie;
+                    } catch (error) {
+                        console.error(`Erro ao carregar série de SPI-${escala}:`, error);
+                        spiSerieCacheAtual[escala] = [];
+                    }
+                });
+            await Promise.all(buscas);
+            desenharGraficoSpiEvolucao();
+        }
+
+        function filtrarSeriePorPeriodo(serieCompleta) {
+            if (spiAnosAtual <= 0) return serieCompleta;
+            const hoje = new Date();
+            const limite = new Date(hoje.getFullYear() - spiAnosAtual, hoje.getMonth(), 1);
+            return serieCompleta.filter(ponto => new Date(ponto.date) >= limite);
+        }
+
+        function formatarLabelMes(dataStr) {
+            const data = new Date(dataStr + "T00:00:00");
+            return `${MESES_ABREV[data.getMonth()]}/${data.getFullYear()}`;
+        }
+
+        // Faixas de referência ao fundo (seca abaixo de -1, úmido acima de +1,
+        // normal sem preenchimento) — BEM suaves (baixa opacidade), só
+        // contexto de leitura; a linha do SPI é a protagonista. Usado SÓ no
+        // modo de escala única — com as 4 linhas do modo "Todas" sobrepostas,
+        // a faixa vira ruído sem ajudar (o foco ali é comparar a defasagem
+        // entre escalas, não reclassificar contra o limiar).
+        const faixasSpiPlugin = {
+            id: "faixasSpiPlugin",
+            beforeDatasetsDraw(chart) {
+                const { ctx, chartArea, scales } = chart;
+                if (!chartArea) return;
+                const yScale = scales.y;
+
+                const desenhaFaixa = (valorTopo, valorBase, cor) => {
+                    const yTopo = Math.max(chartArea.top, yScale.getPixelForValue(valorTopo));
+                    const yBase = Math.min(chartArea.bottom, yScale.getPixelForValue(valorBase));
+                    if (yBase <= yTopo) return;
+                    ctx.save();
+                    ctx.fillStyle = cor;
+                    ctx.fillRect(chartArea.left, yTopo, chartArea.right - chartArea.left, yBase - yTopo);
+                    ctx.restore();
+                };
+
+                desenhaFaixa(yScale.max, 1, "rgba(13, 110, 253, 0.06)");   // úmido (SPI > +1)
+                desenhaFaixa(-1, yScale.min, "rgba(220, 53, 69, 0.06)");   // seco (SPI < -1)
+            },
+        };
+
+        function desenharGraficoSpiEvolucao() {
+            const canvas = document.getElementById("spiEvolucaoChart");
+            const semDadoAviso = document.getElementById("spiEvolucaoSemDado");
+            if (!canvas) return;
+
+            if (spiEvolucaoChartInstance) {
+                spiEvolucaoChartInstance.destroy();
+                spiEvolucaoChartInstance = null;
+            }
+
+            if (spiEscalaAtual === "todas") {
+                desenharGraficoSpiTodasEscalas(canvas, semDadoAviso);
+                return;
+            }
+
+            const serie = filtrarSeriePorPeriodo(spiSerieCacheAtual[spiEscalaAtual] || []);
+            if (serieSpiEhVazia(serie)) {
+                canvas.style.display = "none";
+                if (semDadoAviso) semDadoAviso.style.display = "block";
+                return;
+            }
+            canvas.style.display = "block";
+            if (semDadoAviso) semDadoAviso.style.display = "none";
+            canvas.parentElement.style.height = "280px";
+
+            spiEvolucaoChartInstance = new Chart(canvas, {
+                type: "line",
+                data: {
+                    labels: serie.map(ponto => formatarLabelMes(ponto.date)),
+                    datasets: [{
+                        label: `SPI-${spiEscalaAtual}`,
+                        data: serie.map(ponto => ponto.value),
+                        borderColor: "#343a40",
+                        backgroundColor: "transparent",
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.15,
+                    }],
+                },
+                plugins: [faixasSpiPlugin],
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+                        y: { title: { display: true, text: `SPI-${spiEscalaAtual}` } },
+                    },
+                },
+            });
+        }
+
+        // Modo "Todas": as 4 escalas sobrepostas no mesmo gráfico, cada uma
+        // com sua própria cor (CORES_SPI_ESCALA) — revela a dinâmica da seca
+        // (ex.: SPI-1 caindo antes do SPI-12, sinalizando um déficit de
+        // curto prazo que ainda não se espalhou pro longo prazo).
+        function desenharGraficoSpiTodasEscalas(canvas, semDadoAviso) {
+            const seriesPorEscala = {};
+            ESCALAS_SPI_TODAS.forEach(escala => {
+                seriesPorEscala[escala] = filtrarSeriePorPeriodo(spiSerieCacheAtual[escala] || []);
+            });
+
+            const todasVazias = ESCALAS_SPI_TODAS.every(escala => serieSpiEhVazia(seriesPorEscala[escala]));
+            if (todasVazias) {
+                canvas.style.display = "none";
+                if (semDadoAviso) semDadoAviso.style.display = "block";
+                return;
+            }
+            canvas.style.display = "block";
+            if (semDadoAviso) semDadoAviso.style.display = "none";
+            // Um pouco mais de altura pra legenda não espremer o gráfico.
+            canvas.parentElement.style.height = "320px";
+
+            // União ordenada das datas de todas as escalas — garante as 4
+            // linhas alinhadas no mesmo eixo X mesmo se uma escala tiver
+            // histórico disponível mais curto que outra (ex.: início da
+            // série, quando o SPI-12 ainda não tem 12 meses de janela).
+            const datasUnicas = [...new Set(
+                ESCALAS_SPI_TODAS.flatMap(escala => seriesPorEscala[escala].map(ponto => ponto.date))
+            )].sort();
+
+            const datasets = ESCALAS_SPI_TODAS.map(escala => {
+                const valorPorData = new Map(seriesPorEscala[escala].map(ponto => [ponto.date, ponto.value]));
+                return {
+                    label: `SPI-${escala}`,
+                    data: datasUnicas.map(data => valorPorData.has(data) ? valorPorData.get(data) : null),
+                    borderColor: CORES_SPI_ESCALA[escala],
+                    backgroundColor: "transparent",
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: 0.15,
+                    spanGaps: true,
+                };
+            });
+
+            spiEvolucaoChartInstance = new Chart(canvas, {
+                type: "line",
+                data: { labels: datasUnicas.map(formatarLabelMes), datasets },
+                // Sem faixasSpiPlugin aqui de propósito — com 4 linhas
+                // sobrepostas o foco é a comparação entre escalas, a faixa
+                // de fundo só acrescentaria ruído (decisão confirmada com o
+                // usuário antes de implementar).
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, position: "top", labels: { boxWidth: 14, font: { size: 11 } } },
+                    },
+                    scales: {
+                        x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+                        y: { title: { display: true, text: "SPI" } },
+                    },
+                },
+            });
+        }
+
+        function serieSpiEhVazia(serie) {
+            return !serie || serie.length === 0;
+        }
+
+        // ==================== ANÁLISE CLIMÁTICA AVANÇADA (FASE 2) ====================
+        let tendenciaChartInstance = null;
+
+        // Evolução ao longo dos 45 anos dos indicadores de FASE 2 — série
+        // anual buscada sob demanda (1º "ver evolução" clicado), cacheada
+        // por município no mesmo objeto (as 3 séries vêm juntas do endpoint).
+        let seriesAnuaisCacheAtual = null;
+        let diasChuvososLimiarAtual = 1;
+        let diasChuvososEvolucaoChartInstance = null;
+        let intensidadeEvolucaoChartInstance = null;
+        let veranicoEvolucaoChartInstance = null;
+        let assinaturaChartInstance = null;
+
+        async function carregarIndicadoresFase2(municipioId) {
+            const container = document.getElementById("chirpsFase2Content");
+            if (!container || !municipioId) return;
+            try {
+                const response = await fetch(`/api/municipios/${municipioId}/indicadores-fase2/`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const dados = await response.json();
+                renderizarIndicadoresFase2(dados);
+            } catch (error) {
+                console.error("Erro ao carregar análise climática avançada:", error);
+                container.innerHTML = `<p class="chirps-placeholder">Não foi possível carregar a análise climática avançada agora.</p>`;
+            }
+        }
+
+        function formatarDataCurta(dataStr) {
+            const d = new Date(dataStr + "T00:00:00");
+            return `${String(d.getDate()).padStart(2, "0")}/${MESES_ABREV[d.getMonth()]}/${d.getFullYear()}`;
+        }
+
+        function formatarMesAno(dataStr) {
+            const d = new Date(dataStr + "T00:00:00");
+            return `${MESES_ABREV[d.getMonth()]}/${d.getFullYear()}`;
+        }
+
+        function renderizarIndicadoresFase2(dados) {
+            const container = document.getElementById("chirpsFase2Content");
+            if (!container) return;
+
+            // Município sem CHIRPS suficiente: veranico/recordes/tendência
+            // vêm todos null juntos (mesma base de dado) — um aviso só.
+            if (!dados.veranico && !dados.recordes && !dados.tendencia) {
+                container.innerHTML = `<p class="chirps-placeholder">Ainda não há dado CHIRPS suficiente para ${dados.municipio.nome}/${dados.municipio.uf}.</p>`;
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="fase2-cards-grid mb-3" id="veranicoCardsGrid"></div>
+                <div class="row g-3 mb-3">
+                    <div class="col-6 col-md-3"><div class="chirps-info-card h-100" id="diasChuvososCard"></div></div>
+                    <div class="col-6 col-md-3"><div class="chirps-info-card h-100" id="intensidadeCard"></div></div>
+                    <div class="col-6 col-md-3"><div class="chirps-info-card h-100" id="recordeAnoCard"></div></div>
+                    <div class="col-6 col-md-3"><div class="chirps-info-card h-100" id="recordeMesCard"></div></div>
+                </div>
+
+                <!-- Evolução dos indicadores de FASE 2 ao longo dos 45 anos —
+                     sob demanda, mesmo padrão do "Ver evolução do SPI". -->
+                <div class="spi-evolucao-toggle-wrap mb-3">
+                    <button type="button" class="btn btn-sm btn-outline-primary me-2 mb-2" id="toggleDiasChuvososEvolucaoBtn">
+                        <i class="fas fa-chart-column"></i> Ver evolução — Dias Chuvosos
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary me-2 mb-2" id="toggleIntensidadeEvolucaoBtn">
+                        <i class="fas fa-chart-line"></i> Ver evolução — Intensidade
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary me-2 mb-2" id="toggleVeranicoEvolucaoBtn">
+                        <i class="fas fa-chart-column"></i> Ver evolução — Dias Secos Consecutivos
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary mb-2" id="toggleAssinaturaBtn">
+                        <i class="fas fa-chart-bar"></i> Ver assinatura: Frequência × Intensidade
+                    </button>
+                </div>
+
+                <div class="spi-evolucao-painel mb-3" id="diasChuvososEvolucaoPainel" style="display: none;">
+                    <div class="spi-evolucao-controles">
+                        <div class="btn-group btn-group-sm" role="group" id="diasChuvososLimiarButtons">
+                            <button type="button" class="btn btn-outline-secondary dc-limiar-btn active" data-limiar="1">&gt; 1mm</button>
+                            <button type="button" class="btn btn-outline-secondary dc-limiar-btn" data-limiar="5">&gt; 5mm</button>
+                            <button type="button" class="btn btn-outline-secondary dc-limiar-btn" data-limiar="10">&gt; 10mm</button>
+                        </div>
+                    </div>
+                    <div id="diasChuvososTendenciaTexto"></div>
+                    <div style="position: relative; height: 280px;">
+                        <canvas id="diasChuvososEvolucaoChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="spi-evolucao-painel mb-3" id="intensidadeEvolucaoPainel" style="display: none;">
+                    <div id="intensidadeTendenciaTexto"></div>
+                    <div style="position: relative; height: 280px;">
+                        <canvas id="intensidadeEvolucaoChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="spi-evolucao-painel mb-3" id="veranicoEvolucaoPainel" style="display: none;">
+                    <div id="veranicoTendenciaTexto"></div>
+                    <div style="position: relative; height: 280px;">
+                        <canvas id="veranicoEvolucaoChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="spi-evolucao-painel mb-3" id="assinaturaPainel" style="display: none;">
+                    <p class="chirps-placeholder mb-2" style="text-align: left; padding: 0;">
+                        Frequência (barras, dias com chuva) e intensidade (linha, mm por dia chuvoso) no mesmo gráfico — revela se a chuva está mudando de padrão (menos vezes, porém mais forte por evento, ou o contrário).
+                    </p>
+                    <div style="position: relative; height: 300px;">
+                        <canvas id="assinaturaChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="tendencia-destaque mb-3" id="tendenciaDestaque"></div>
+                <div class="chirps-chart-container">
+                    <h6 class="section-title mb-2">Totais Anuais de Chuva e Tendência de Longo Prazo</h6>
+                    <div style="position: relative; height: 280px;">
+                        <canvas id="tendenciaChart"></canvas>
+                    </div>
+                </div>
+            `;
+
+            // Série anual (dias chuvosos/intensidade/veranico) é buscada sob
+            // demanda, no 1º clique em qualquer "ver evolução" — reseta o
+            // cache/estado a cada município novo renderizado.
+            seriesAnuaisCacheAtual = null;
+            diasChuvososLimiarAtual = 1;
+            configurarPainelEvolucaoFase2();
+
+            // --- Veranico (dias secos consecutivos — termo neutro, sem
+            // linguagem agronômica prescritiva) ---
+            const veranicoGrid = document.getElementById("veranicoCardsGrid");
+            const formatarCardVeranico = (sub, titulo) => {
+                if (!sub) {
+                    return `<div class="fase2-card"><div class="fase2-card-titulo">${titulo}</div><div class="fase2-card-valor">—</div></div>`;
+                }
+                const periodo = sub.inicio ? `${formatarDataCurta(sub.inicio)} a ${formatarDataCurta(sub.fim)}` : `até ${formatarDataCurta(sub.fim)}`;
+                return `
+                    <div class="fase2-card">
+                        <div class="fase2-card-titulo">${titulo}</div>
+                        <div class="fase2-card-valor">${sub.dias} dias</div>
+                        <div class="fase2-card-detalhe">${periodo}</div>
+                    </div>
+                `;
+            };
+            veranicoGrid.innerHTML = dados.veranico
+                ? formatarCardVeranico(dados.veranico.recente_12_meses, "Dias secos consecutivos — últimos 12 meses")
+                  + formatarCardVeranico(dados.veranico.recorde_historico, "Dias secos consecutivos — recorde histórico")
+                : `<div class="fase2-card"><div class="fase2-card-titulo">Dias secos consecutivos</div><div class="fase2-card-valor">—</div></div>`;
+
+            // --- Dias chuvosos ---
+            const dc = dados.dias_chuvosos;
+            document.getElementById("diasChuvososCard").innerHTML = dc ? `
+                <div class="chirps-info-title">Dias Chuvosos — ${dc.ano}</div>
+                <div class="chirps-info-valor">${dc.limiares["1"]} dias</div>
+                <div class="chirps-info-detalhe">acima de 1mm (${dc.limiares["5"]} acima de 5mm, ${dc.limiares["10"]} acima de 10mm)</div>
+            ` : `<div class="chirps-info-title">Dias Chuvosos</div><div class="chirps-info-valor">—</div>`;
+
+            // --- Intensidade da chuva ---
+            const ic = dados.intensidade_chuva;
+            document.getElementById("intensidadeCard").innerHTML = ic ? `
+                <div class="chirps-info-title">Intensidade da Chuva — ${ic.ano}</div>
+                <div class="chirps-info-valor">${ic.intensidade_mm_por_dia_chuvoso !== null ? ic.intensidade_mm_por_dia_chuvoso.toFixed(1) + " mm/dia" : "—"}</div>
+                <div class="chirps-info-detalhe">${ic.total_mm.toFixed(0)} mm em ${ic.dias_com_chuva} dias com chuva</div>
+            ` : `<div class="chirps-info-title">Intensidade da Chuva</div><div class="chirps-info-valor">—</div>`;
+
+            // --- Recordes ---
+            const r = dados.recordes;
+            document.getElementById("recordeAnoCard").innerHTML = r ? `
+                <div class="chirps-info-title">Recordes Anuais</div>
+                <div class="chirps-info-detalhe">Mais chuvoso: <strong>${r.ano_mais_chuvoso.ano}</strong> (${r.ano_mais_chuvoso.total_mm.toFixed(0)} mm)</div>
+                <div class="chirps-info-detalhe">Mais seco: <strong>${r.ano_mais_seco.ano}</strong> (${r.ano_mais_seco.total_mm.toFixed(0)} mm)</div>
+            ` : `<div class="chirps-info-title">Recordes Anuais</div><div class="chirps-info-valor">—</div>`;
+
+            document.getElementById("recordeMesCard").innerHTML = r ? `
+                <div class="chirps-info-title">Recordes Mensais</div>
+                <div class="chirps-info-detalhe">Mais chuvoso: <strong>${formatarMesAno(r.mes_mais_chuvoso.date)}</strong> (${r.mes_mais_chuvoso.total_mm.toFixed(0)} mm)</div>
+                <div class="chirps-info-detalhe">Mais seco: <strong>${formatarMesAno(r.mes_mais_seco.date)}</strong> (${r.mes_mais_seco.total_mm.toFixed(1)} mm)</div>
+            ` : `<div class="chirps-info-title">Recordes Mensais</div><div class="chirps-info-valor">—</div>`;
+
+            // --- Tendência de longo prazo (Mann-Kendall + Sen's slope) ---
+            const t = dados.tendencia;
+            const destaque = document.getElementById("tendenciaDestaque");
+            if (t) {
+                let classe, direcaoTexto;
+                if (t.significativo && t.direcao === "aumento") {
+                    classe = "tendencia-significativa-aumento";
+                    direcaoTexto = "aumento estatisticamente significativo";
+                } else if (t.significativo && t.direcao === "reducao") {
+                    classe = "tendencia-significativa-reducao";
+                    direcaoTexto = "redução estatisticamente significativa";
+                } else {
+                    classe = "tendencia-sem-significancia";
+                    direcaoTexto = "sem tendência estatisticamente significativa";
+                }
+                const sinal = t.slope_mm_por_ano >= 0 ? "+" : "";
+                destaque.className = `tendencia-destaque mb-3 ${classe}`;
+                destaque.innerHTML = `
+                    <div class="tendencia-titulo">Tendência de Longo Prazo (${t.n_anos} anos, Mann-Kendall + Sen's slope)</div>
+                    <div class="tendencia-valor">${sinal}${t.slope_mm_por_ano.toFixed(2)} mm/ano</div>
+                    <div class="tendencia-detalhe">Chuva anual apresenta ${direcaoTexto} (p=${t.p_valor.toFixed(3)}).</div>
+                `;
+                renderizarGraficoTendencia(t);
+            } else {
+                destaque.className = "tendencia-destaque mb-3 tendencia-sem-significancia";
+                destaque.innerHTML = `
+                    <div class="tendencia-titulo">Tendência de Longo Prazo</div>
+                    <div class="tendencia-valor">—</div>
+                    <div class="tendencia-detalhe">Histórico insuficiente ainda.</div>
+                `;
+            }
+        }
+
+        function renderizarGraficoTendencia(t) {
+            const canvas = document.getElementById("tendenciaChart");
+            if (!canvas) return;
+            if (tendenciaChartInstance) {
+                tendenciaChartInstance.destroy();
+            }
+
+            const labels = t.anos.map(String);
+            // Reta de Sen's slope avaliada em cada ano — sobreposta ao total
+            // anual real pra visualizar a magnitude da tendência.
+            const linhaTendencia = t.anos.map(ano => t.slope_mm_por_ano * ano + t.intercepto_sen);
+
+            tendenciaChartInstance = new Chart(canvas, {
+                type: "line",
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: "Total anual (mm)",
+                            data: t.valores,
+                            borderColor: "#0d6efd",
+                            backgroundColor: "transparent",
+                            borderWidth: 1.5,
+                            pointRadius: 2,
+                            tension: 0.1,
+                        },
+                        {
+                            label: "Tendência (Sen's slope)",
+                            data: linhaTendencia,
+                            borderColor: "#dc3545",
+                            backgroundColor: "transparent",
+                            borderWidth: 2,
+                            borderDash: [6, 4],
+                            pointRadius: 0,
+                            tension: 0,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, position: "top", labels: { boxWidth: 14, font: { size: 11 } } },
+                    },
+                    scales: {
+                        x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+                        y: { title: { display: true, text: "mm/ano" } },
+                    },
+                },
+            });
+        }
+
+        // --- Evolução ao longo do tempo dos indicadores de FASE 2 ---
+
+        async function garantirSeriesAnuaisCarregadas() {
+            if (seriesAnuaisCacheAtual) return seriesAnuaisCacheAtual;
+            try {
+                const response = await fetch(`/api/municipios/${municipioIdAtual}/series-anuais/`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                seriesAnuaisCacheAtual = await response.json();
+            } catch (error) {
+                console.error("Erro ao carregar séries anuais:", error);
+                seriesAnuaisCacheAtual = null;
+            }
+            return seriesAnuaisCacheAtual;
+        }
+
+        function configurarPainelEvolucaoFase2() {
+            const paineis = [
+                { btnId: "toggleDiasChuvososEvolucaoBtn", painelId: "diasChuvososEvolucaoPainel", desenhar: desenharGraficoDiasChuvososEvolucao },
+                { btnId: "toggleIntensidadeEvolucaoBtn", painelId: "intensidadeEvolucaoPainel", desenhar: desenharGraficoIntensidadeEvolucao },
+                { btnId: "toggleVeranicoEvolucaoBtn", painelId: "veranicoEvolucaoPainel", desenhar: desenharGraficoVeranicoEvolucao },
+                { btnId: "toggleAssinaturaBtn", painelId: "assinaturaPainel", desenhar: desenharGraficoAssinatura },
+            ];
+
+            paineis.forEach(({ btnId, painelId, desenhar }) => {
+                const btn = document.getElementById(btnId);
+                const painel = document.getElementById(painelId);
+                if (!btn || !painel) return;
+                btn.addEventListener("click", async () => {
+                    const estaEscondido = painel.style.display === "none";
+                    painel.style.display = estaEscondido ? "block" : "none";
+                    if (estaEscondido) {
+                        const dados = await garantirSeriesAnuaisCarregadas();
+                        if (dados) desenhar(dados);
+                    }
+                });
+            });
+
+            document.querySelectorAll(".dc-limiar-btn").forEach(btn => {
+                btn.addEventListener("click", async () => {
+                    document.querySelectorAll(".dc-limiar-btn").forEach(b => b.classList.remove("active"));
+                    btn.classList.add("active");
+                    diasChuvososLimiarAtual = btn.dataset.limiar;
+                    const dados = await garantirSeriesAnuaisCarregadas();
+                    if (dados) desenharGraficoDiasChuvososEvolucao(dados);
+                });
+            });
+        }
+
+        function _anosOrdenados(objAno) {
+            return Object.keys(objAno).map(Number).sort((a, b) => a - b);
+        }
+
+        // Destaque de tendência HONESTO, reaproveitado nos 3 gráficos de
+        // evolução — nunca dá a entender tendência onde o teste não
+        // sustenta. 3 casos possíveis:
+        //   1) significativo (aumento OU redução) → nomeia a direção + p-valor
+        //   2) não significativo, mas a leitura natural do indicador é
+        //      "estável quando plano" (intensidade) → "Estável — sem tendência..."
+        //   3) não significativo, indicador onde a direção observada ainda
+        //      vale nomear sem prometer significância (dias chuvosos) →
+        //      "Tendência de X, NÃO estatisticamente significativa"
+        function renderizarDestaqueTendencia(elementoId, t, unidade, rotulos) {
+            const el = document.getElementById(elementoId);
+            if (!el) return;
+
+            if (!t) {
+                el.className = "tendencia-destaque-mini tendencia-sem-significancia";
+                el.innerHTML = `<div class="tendencia-detalhe">Histórico insuficiente ainda.</div>`;
+                return;
+            }
+
+            const sinal = t.slope_mm_por_ano >= 0 ? "+" : "";
+            const slopeTexto = `${sinal}${t.slope_mm_por_ano.toFixed(3)} ${unidade}`;
+            let classe, texto;
+
+            if (t.significativo && t.direcao === "aumento") {
+                classe = "tendencia-significativa-aumento";
+                texto = `Tendência de ${rotulos.aumento} estatisticamente significativa: ${slopeTexto} (Mann-Kendall, p=${t.p_valor.toFixed(3)}).`;
+            } else if (t.significativo && t.direcao === "reducao") {
+                classe = "tendencia-significativa-reducao";
+                texto = `Tendência de ${rotulos.reducao} estatisticamente significativa: ${slopeTexto} (Mann-Kendall, p=${t.p_valor.toFixed(3)}).`;
+            } else if (rotulos.estavelQuandoNaoSignificativo) {
+                classe = "tendencia-sem-significancia";
+                texto = `Estável — sem tendência estatisticamente significativa (p=${t.p_valor.toFixed(3)}).`;
+            } else {
+                classe = "tendencia-sem-significancia";
+                const direcaoTexto = t.direcao === "aumento" ? rotulos.aumento : (t.direcao === "reducao" ? rotulos.reducao : "estável");
+                texto = `Tendência de ${direcaoTexto}, NÃO estatisticamente significativa (p=${t.p_valor.toFixed(3)}).`;
+            }
+
+            el.className = `tendencia-destaque-mini ${classe}`;
+            el.innerHTML = `<div class="tendencia-detalhe">${texto}</div>`;
+        }
+
+        function desenharGraficoDiasChuvososEvolucao(dados) {
+            const canvas = document.getElementById("diasChuvososEvolucaoChart");
+            if (!canvas || !dados.dias_chuvosos) return;
+
+            const bloco = dados.dias_chuvosos[String(diasChuvososLimiarAtual)];
+            const serieLimiar = bloco.serie;
+            const anos = _anosOrdenados(serieLimiar);
+            const valores = anos.map(ano => serieLimiar[ano]);
+
+            // Achado principal (Cáceres/Tangará: redução significativa) e
+            // caso honesto de "não confirmado" (Cuiabá) — mesmo tratamento,
+            // nomeando a direção sem prometer significância que não existe.
+            renderizarDestaqueTendencia("diasChuvososTendenciaTexto", bloco.tendencia, "dias/ano", {
+                aumento: "aumento", reducao: "redução", estavelQuandoNaoSignificativo: false,
+            });
+
+            if (diasChuvososEvolucaoChartInstance) diasChuvososEvolucaoChartInstance.destroy();
+            diasChuvososEvolucaoChartInstance = new Chart(canvas, {
+                type: "bar",
+                data: {
+                    labels: anos.map(String),
+                    datasets: [{
+                        label: `Dias com chuva > ${diasChuvososLimiarAtual}mm`,
+                        data: valores,
+                        backgroundColor: "#0d6efd",
+                        borderRadius: 3,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+                        y: { title: { display: true, text: "dias" } },
+                    },
+                },
+            });
+        }
+
+        function desenharGraficoIntensidadeEvolucao(dados) {
+            const canvas = document.getElementById("intensidadeEvolucaoChart");
+            if (!canvas || !dados.intensidade) return;
+
+            const serie = dados.intensidade.serie;
+            const anos = _anosOrdenados(serie);
+            const valores = anos.map(ano => serie[ano].intensidade_mm_por_dia_chuvoso);
+
+            const datasets = [{
+                label: "Intensidade (mm/dia chuvoso)",
+                data: valores,
+                borderColor: "#0d6efd",
+                backgroundColor: "transparent",
+                borderWidth: 1.5,
+                pointRadius: 2,
+                tension: 0.1,
+            }];
+
+            // Estável é um RESULTADO, não ausência de resultado — mesmo
+            // quando não há reta significativa pra sobrepor, o texto deixa
+            // isso explícito em vez de simplesmente não dizer nada.
+            renderizarDestaqueTendencia("intensidadeTendenciaTexto", dados.intensidade.tendencia, "mm/dia chuvoso/ano", {
+                aumento: "intensificação", reducao: "redução de intensidade", estavelQuandoNaoSignificativo: true,
+            });
+
+            // Reta de Sen's slope DESSA série (independente da tendência do
+            // total anual) — só desenha se houve histórico suficiente.
+            const t = dados.intensidade.tendencia;
+            if (t) {
+                const linhaTendencia = anos.map(ano => t.slope_mm_por_ano * ano + t.intercepto_sen);
+                datasets.push({
+                    label: "Tendência (Sen's slope)",
+                    data: linhaTendencia,
+                    borderColor: "#dc3545",
+                    backgroundColor: "transparent",
+                    borderWidth: 2,
+                    borderDash: [6, 4],
+                    pointRadius: 0,
+                    tension: 0,
+                });
+            }
+
+            if (intensidadeEvolucaoChartInstance) intensidadeEvolucaoChartInstance.destroy();
+            intensidadeEvolucaoChartInstance = new Chart(canvas, {
+                type: "line",
+                data: { labels: anos.map(String), datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, position: "top", labels: { boxWidth: 14, font: { size: 11 } } },
+                    },
+                    scales: {
+                        x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+                        y: { title: { display: true, text: "mm/dia chuvoso" } },
+                    },
+                },
+            });
+        }
+
+        function desenharGraficoVeranicoEvolucao(dados) {
+            const canvas = document.getElementById("veranicoEvolucaoChart");
+            if (!canvas || !dados.veranico_maximo) return;
+
+            const serie = dados.veranico_maximo.serie;
+            const anos = _anosOrdenados(serie);
+            const valores = anos.map(ano => {
+                const sub = serie[ano];
+                return sub ? sub.dias : 0;
+            });
+
+            // Achado principal da análise (significativo nos 3 municípios
+            // piloto) — mesmo componente honesto dos outros, mas aqui é
+            // esperado aparecer com destaque de "aumento significativo" na
+            // maioria dos casos reais já testados.
+            renderizarDestaqueTendencia("veranicoTendenciaTexto", dados.veranico_maximo.tendencia, "dias/ano", {
+                aumento: "aumento", reducao: "redução", estavelQuandoNaoSignificativo: false,
+            });
+
+            if (veranicoEvolucaoChartInstance) veranicoEvolucaoChartInstance.destroy();
+            veranicoEvolucaoChartInstance = new Chart(canvas, {
+                type: "bar",
+                data: {
+                    labels: anos.map(String),
+                    datasets: [{
+                        label: "Maior sequência de dias secos consecutivos",
+                        data: valores,
+                        backgroundColor: "#fd7e14",
+                        borderRadius: 3,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+                        y: { title: { display: true, text: "dias" } },
+                    },
+                },
+            });
+        }
+
+        // "Assinatura" frequência × intensidade — sugestão adicional
+        // aprovada pelo usuário: eixo duplo, mesma série já buscada pros
+        // dois gráficos individuais acima, sem endpoint novo.
+        function desenharGraficoAssinatura(dados) {
+            const canvas = document.getElementById("assinaturaChart");
+            if (!canvas || !dados.dias_chuvosos || !dados.intensidade) return;
+
+            const diasSerie = dados.dias_chuvosos["1"].serie;
+            const intensidadeSerie = dados.intensidade.serie;
+            const anos = _anosOrdenados(diasSerie);
+            const diasValores = anos.map(ano => diasSerie[ano]);
+            const intensidadeValores = anos.map(ano => (
+                intensidadeSerie[ano] ? intensidadeSerie[ano].intensidade_mm_por_dia_chuvoso : null
+            ));
+
+            if (assinaturaChartInstance) assinaturaChartInstance.destroy();
+            assinaturaChartInstance = new Chart(canvas, {
+                data: {
+                    labels: anos.map(String),
+                    datasets: [
+                        {
+                            type: "bar",
+                            label: "Dias chuvosos (> 1mm)",
+                            data: diasValores,
+                            backgroundColor: "rgba(13, 110, 253, 0.5)",
+                            yAxisID: "y",
+                            order: 2,
+                        },
+                        {
+                            type: "line",
+                            label: "Intensidade (mm/dia chuvoso)",
+                            data: intensidadeValores,
+                            borderColor: "#dc3545",
+                            backgroundColor: "transparent",
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            tension: 0.1,
+                            yAxisID: "y1",
+                            order: 1,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, position: "top", labels: { boxWidth: 14, font: { size: 11 } } },
+                    },
+                    scales: {
+                        x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+                        y: { type: "linear", position: "left", title: { display: true, text: "dias chuvosos" } },
+                        y1: {
+                            type: "linear", position: "right",
+                            title: { display: true, text: "mm/dia chuvoso" },
+                            grid: { drawOnChartArea: false },
+                        },
+                    },
+                },
+            });
+        }
+
+        // Clique/toque no mapa → identifica o município (PostGIS
+        // point-in-polygon) → reaproveita EXATAMENTE o mesmo caminho do
+        // dropdown (populateMunicipios pra sincronizar o <select>,
+        // aplicarSelecaoMunicipio pra desenhar contorno + carregar todos
+        // os indicadores) — nenhuma lógica nova além da busca do ponto.
+        async function handleMapClick(lat, lon) {
+            try {
+                const response = await fetch(`/api/municipio-por-ponto/?lat=${lat}&lon=${lon}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const municipio = await response.json();
+
+                if (!municipio) {
+                    const hint = document.getElementById("localitySelectorHint");
+                    if (hint) {
+                        hint.textContent = "Clique dentro de Mato Grosso para ver os indicadores climáticos.";
+                    }
+                    return;
+                }
+
+                const estadoSelect = document.getElementById("estadoSelect");
+                if (estadoSelect) estadoSelect.value = municipio.uf;
+
+                // Só sincroniza o <select> (não dispara nada sozinha — mesmo
+                // comportamento já documentado onde populateMunicipios é
+                // usada em populateEstados).
+                await populateMunicipios(municipio.uf, municipio.codigo_ibge);
+
+                // Mesma função que o "change" do dropdown já chama — contorno,
+                // centralização e todos os indicadores (Fase 1 + Fase 2).
+                aplicarSelecaoMunicipio(municipio.id);
+            } catch (error) {
+                console.error("Erro ao identificar o município pelo clique no mapa:", error);
+            }
+        }
+
         async function aplicarSelecaoMunicipio(municipioId) {
             if (!municipioId) return;
             try {
@@ -625,6 +1803,8 @@
 
                 const { lat, lon } = feature.properties.centroide;
                 loadWeatherData(lat, lon);
+                carregarIndicadoresClimaticos(feature.properties.id);
+                carregarIndicadoresFase2(feature.properties.id);
 
                 const hint = document.getElementById("localitySelectorHint");
                 if (hint) {
@@ -663,7 +1843,7 @@
     </script>
 
     <footer class="text-center text-white py-3 mt-5" style="background-color: #1a1a1a; font-size: 0.9rem;">
-        <p class="m-0">© 2026 GeoClima MT</p>
+        <p class="m-0">© 2026 MonitorChuva MT</p>
         <p class="m-0 text-muted small" style="font-size: 0.75rem;">Dados fornecidos por Open-Meteo e RainViewer.</p>
     </footer>
 </body>

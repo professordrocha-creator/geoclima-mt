@@ -7,7 +7,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Relatório — {{ fazenda.name }} — GeoClima MT</title>
+    <title>Relatório — {{ fazenda.name }} — MonitorChuva MT</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -34,7 +34,7 @@
     <div class="cabecalho">
         <div>
             <h1 class="m-0">{{ fazenda.name }}</h1>
-            <p class="text-muted m-0">{{ fazenda.municipio.nome }}/{{ fazenda.municipio.uf }} — Relatório GeoClima MT</p>
+            <p class="text-muted m-0">{{ fazenda.municipio.nome }}/{{ fazenda.municipio.uf }} — Relatório MonitorChuva MT</p>
         </div>
         <div class="text-end small text-muted">
             Gerado em {{ gerado_em|date:"d/m/Y H:i" }}<br>
@@ -146,7 +146,7 @@
     {% endif %}
 
     <p class="text-muted small mt-4" style="border-top: 1px solid #dee2e6; padding-top: 0.5rem;">
-        GeoClima MT — plataforma de monitoramento climático e apoio à decisão agrícola. Relatório gerado
+        MonitorChuva MT — plataforma de monitoramento climático e apoio à decisão agrícola. Relatório gerado
         automaticamente a partir de dado CHIRPS/local; interpretação automática, não substitui avaliação
         agronômica profissional.
     </p>

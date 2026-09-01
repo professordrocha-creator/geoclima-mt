@@ -1468,3 +1468,146 @@ qualquer variável de ambiente nova adicionada daqui pra frente.
   re-testado do zero com o backend novo: resposta em 613ms, as 3
   etapas rodando em ordem e com sucesso, dado real do usuário
   conferido intacto antes/depois.
+
+## 2026-08-31 — Indicadores climáticos por município, on-the-fly, sem persistência (climate/municipio_indicators.py)
+
+**Contexto:** com o CHIRPS dos 142 municípios de MT importado (backfill
+completo, ver entrada de importação em HISTORICO.md), o objetivo
+passou a ser mostrar indicadores climáticos (SPI, anomalia, percentil
+histórico, climatologia, acumulados) pra QUALQUER município, na home
+pública, sem depender de existir fazenda/estação cadastrada — o que
+`SpiResult` (Etapa 7.1) não permite, por estar amarrado a `station`
+(FK obrigatória, sem `municipio`).
+
+**Decisão: nenhum model novo, nenhuma migration.** Investigação prévia
+(pedida explicitamente antes de codar) confirmou que o CÁLCULO do SPI
+já era por município desde a Etapa 7.1 —
+`spi.services.calcular_serie_spi(municipio, escala)` nunca dependeu de
+estação; só a CAMADA DE GRAVAÇÃO (`calcular_spi` management command)
+amarra o resultado a `Station` na hora de persistir. Da mesma forma,
+`climate/trends.py` (Etapa 10) já calculava tendência/climatologia
+por município, on-the-fly, sem tabela — esse é o padrão que
+`climate/municipio_indicators.py` estende, não inventa.
+
+**Por quê on-the-fly em vez de uma tabela `MunicipioIndicador`:**
+medido antes de decidir — `calcular_serie_spi` roda em ~20ms por
+município/escala (é uma agregação SQL mensal + rolling window em
+Python sobre ~536 meses de histórico, não usa GEE). Cachear isso numa
+tabela batch (como o antigo `calcular_spi` faz pra `SpiResult`) exigiria
+um comando/Celery task rodando pros 142 municípios toda vez que o
+CHIRPS atualiza, e ainda assim ficaria com dado de até 1 dia de
+atraso — o mesmo atraso que o cache Redis já dá, sem o custo de
+manter uma tabela sincronizada. Persistência só voltaria a fazer
+sentido se o cálculo ficasse caro o bastante pra doer a cada request
+(não é o caso hoje).
+
+**Cache Redis (não obrigatório, mas ligado por padrão):** chave
+`municipio_indicators:{função}:{codigo_ibge}:{parâmetros}`, TTL de 1
+dia — CHIRPS só atualiza 1x/dia (`atualizar_chirps`, 04:00). Um
+resultado `None` (dado insuficiente) nunca é cacheado de propósito: é
+mais barato recalcular um "sem dado" do que arriscar esconder por até
+1 dia um resultado que passou a existir assim que o CHIRPS daquele
+município for importado. `CACHE_HABILITADO = True` é uma flag de
+módulo (não settings/env) pra poder desligar rápido durante teste
+sem editar múltiplas funções.
+
+**SPI-1 passou a existir** (`spi/services.py:ESCALAS_VALIDAS` ganhou
+o valor `1`, além de `3/6/12`) — o cálculo já funcionava pra janela de
+1 mês (é só o próprio mês, sem soma corrente), só a validação
+bloqueava. Não persiste em `SpiResult` (que continua só 3/6/12, model
+intocado) — SPI-1 só existe on-the-fly, via
+`municipio_indicators.spi_serie`.
+
+**O que ficou de fora de propósito (fora do escopo desta entrada):**
+`dashboard/services.py:serie_spi` (painel privado de fazenda) não foi
+tocado — continua lendo `SpiResult` por estação, funcionando como
+antes. FASE 2 (veranicos, dias chuvosos, intensidade, recordes,
+tendência via Mann-Kendall + Sen's slope em vez da regressão linear
+simples atual) fica pra uma entrada futura — decisão explícita do
+usuário de validar a FASE 1 primeiro.
+
+**Testado** com 3 municípios (Tangará da Serra, Cáceres, Cuiabá) e
+todas as 6 funções públicas, sem cache primeiro (`CACHE_HABILITADO =
+False` no shell) pra conferir o cálculo cru, depois com cache ligado
+(hit confirmado fisicamente: chave presente no Redis via
+`cache.get()`, segunda chamada de `spi_serie` caiu de 20ms pra <1ms
+com resultado idêntico). Valores conferem com o padrão climático
+esperado (jul/2026, mês seco em MT: anomalia percentual entre 56% e
+101% da média histórica conforme o município, SPI-3/6/12 em faixa
+normal, nenhum valor negativo/zerado sem explicação).
+
+## 2026-08-31 — FASE 2 dos indicadores por município: Mann-Kendall + Sen's slope sem dependência pesada
+
+**Decisão:** a tendência de longo prazo da FASE 2 usa o teste de
+Mann-Kendall (direção + significância estatística) e o estimador de
+Sen's slope (magnitude robusta), em vez de continuar só com a
+regressão linear simples (`climate.trends.tendencia_anual`, Etapa 10 —
+**mantida, não removida**: ainda é usada onde já estava, este indicador
+novo é adicional). É o método padrão da literatura pra tendência em
+séries climáticas justamente porque testa se o padrão é
+estatisticamente robusto, não só ajusta uma reta que sempre "acha"
+alguma inclinação em qualquer ruído.
+
+**Por quê sem numpy/scipy:** ambos os algoritmos são O(n²) sobre uma
+série de ~45 pontos (totais anuais) — ~990 pares, microssegundos em
+Python puro. A única peça que costuma justificar scipy
+(`scipy.stats.norm.cdf`, pra converter Z em p-valor) tem equivalente
+exato na stdlib: `math.erfc`. Mesma filosofia já aplicada no SPI
+(`spi/services.py`, Etapa 7.1 — "sem scipy, fórmula z-score simples,
+sem inventar complexidade que não foi pedida").
+
+**Fórmulas implementadas** (`climate/municipio_indicators.py`,
+`_mann_kendall_s_z_p` e `_sens_slope`):
+
+```
+Mann-Kendall:
+  S = Σ_{i<j} sign(x_j - x_i)                    — todo par de anos
+  Var(S) = [n(n-1)(2n+5) - Σ t(t-1)(2t+5)] / 18   — t = tamanho de cada grupo de valores empatados
+  Z = (S-1)/√Var(S)  se S>0
+      0              se S=0
+      (S+1)/√Var(S)  se S<0                       — correção de continuidade
+  p = erfc(|Z| / √2)                              — bicaudal; equivale a 2×(1-Φ(|Z|)) da normal padrão
+
+Sen's slope:
+  slope = mediana{ (x_j - x_i)/(ano_j - ano_i) }  — todo par i<j (Theil-Sen)
+  intercepto = mediana(x) - slope × mediana(ano)
+```
+`p < 0.05` → tendência estatisticamente significativa (direção dada
+pelo sinal de `S`/`slope`).
+
+**Validação com série sintética** (slope conhecido de antemão, ANTES
+de rodar em dado real — mesmo princípio já usado na validação do
+índice c/d da Etapa 7.2):
+
+| Caso | Série | Slope recuperado | p-valor |
+|---|---|---|---|
+| 1 | Linear pura, slope=+2.5, sem ruído (45 anos) | **2.5000** (exato) | 3,9×10⁻²² |
+| 2 | Ruído puro, sem tendência | 0.044 (≈0) | 0,76 (não significativo — correto) |
+| 3 | Linear slope=+3.0 + ruído gaussiano moderado | 2.80 (próximo) | ≈0 (significativo, sinal sobrevive ao ruído) |
+| 4 | Linear pura, slope=−1.8, sem ruído | **−1.8000** (exato) | 3,9×10⁻²² |
+
+Os casos 1 e 4 confirmam o estimador exato quando não há ruído (o
+melhor teste possível pra bug de implementação); o caso 2 confirma que
+ruído sem padrão real corretamente NÃO dá significância (o teste não
+"inventa" tendência); o caso 3 confirma robustez a ruído realista.
+
+**Cross-validação com dado real** contra a regressão linear simples
+que já existia (`tendencia_anual`) — concordância próxima nos dois
+municípios piloto (Sen vs. OLS): Tangará da Serra −3,11 vs. −3,50
+mm/ano; Cáceres −4,02 vs. −3,99 mm/ano. Mas o Mann-Kendall entrega o
+que a regressão simples não dá — **significância**: Cáceres tem
+p=0,011 (significativo), Tangará tem p=0,107 (não significativo),
+apesar de slopes de magnitude parecida — a série de Tangará tem mais
+variância ano a ano, então a mesma inclinação aparente não é
+estatisticamente distinguível de ruído. Essa é exatamente a nuance que
+justifica o método mais rigoroso em vez de só reportar a inclinação da
+reta.
+
+**Bug real pego durante o teste** (documentado em detalhe em
+HISTORICO.md): a função de veranico (`_maior_sequencia_seca`) tinha um
+bug de lógica — confundia "data consecutiva à anterior" com "o dia
+anterior também fazia parte da sequência seca". Um dia seco logo após
+um dia de chuva era incorretamente tratado como continuação. Só
+apareceu ao testar contra dado real (`inicio` sempre `None`, `fim`
+sempre certo) — corrigido e revalidado com 2 casos controlados antes
+de re-testar contra os municípios reais.

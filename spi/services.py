@@ -39,7 +39,12 @@ from django.db.models.functions import TruncMonth
 
 from climate.models import ChirpsData
 
-ESCALAS_VALIDAS = (3, 6, 12)
+ESCALAS_VALIDAS = (1, 3, 6, 12)
+# SPI-1 foi adicionado pra alimentar climate/municipio_indicators.py (Etapa
+# fora do roadmap, indicadores por município da home pública) — o cálculo
+# em si já funcionava pra escala=1 (janela de 1 mês é só o próprio mês),
+# só a validação bloqueava. Não persiste em SpiResult (que continua só
+# 3/6/12, não mudou) — SPI-1 só é usado on-the-fly.
 
 # Mínimo de anos de histórico no mesmo mês do calendário pra considerar a
 # média/desvio-padrão climatológicos confiáveis. Menos que isso, o SPI

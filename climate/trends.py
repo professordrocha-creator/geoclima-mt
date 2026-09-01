@@ -79,30 +79,44 @@ def tendencia_anual(municipio):
     }
 
 
-def normais_climatologicas_mensais(municipio):
+def totais_mensais(municipio):
     """
-    dict {mes (1-12): {"media", "mediana", "p25", "p75", "minimo",
-    "maximo", "n_anos"}} — estatística dos totais mensais de chuva
-    agrupados por mês do calendário, em todos os anos históricos
-    disponíveis. Exclui o mês corrente (sempre incompleto). Mês com
-    menos de MINIMO_ANOS_NORMAL_CLIMATOLOGICA anos de amostra fica de
-    fora do dict (dado insuficiente pra uma normal climatológica
-    confiável).
+    dict {date(primeiro dia do mês): total_mm} — um total por MÊS
+    INDIVIDUAL (não agrupado por mês do calendário) em toda a série
+    histórica. Exclui o mês corrente (sempre incompleto), mesmo
+    critério de totais_anuais. Base tanto de
+    normais_climatologicas_mensais (agrupada por mês do calendário)
+    quanto de climate.municipio_indicators.recordes (mês mais
+    chuvoso/seco JÁ REGISTRADO — precisa do total por mês individual,
+    não da média por mês do calendário).
     """
     hoje = timezone.localdate()
-    totais_por_mes = defaultdict(list)
-
     linhas = (
         ChirpsData.objects.filter(municipio=municipio)
         .annotate(mes_ano=TruncMonth("date"))
         .values("mes_ano")
         .annotate(total=Sum("value"))
+        .order_by("mes_ano")
     )
-    for linha in linhas:
-        data = linha["mes_ano"]
-        if data.year == hoje.year and data.month == hoje.month:
-            continue
-        totais_por_mes[data.month].append(linha["total"])
+    return {
+        linha["mes_ano"]: linha["total"]
+        for linha in linhas
+        if not (linha["mes_ano"].year == hoje.year and linha["mes_ano"].month == hoje.month)
+    }
+
+
+def normais_climatologicas_mensais(municipio):
+    """
+    dict {mes (1-12): {"media", "mediana", "p25", "p75", "minimo",
+    "maximo", "n_anos"}} — estatística dos totais mensais de chuva
+    agrupados por mês do calendário, em todos os anos históricos
+    disponíveis. Mês com menos de MINIMO_ANOS_NORMAL_CLIMATOLOGICA anos
+    de amostra fica de fora do dict (dado insuficiente pra uma normal
+    climatológica confiável).
+    """
+    totais_por_mes = defaultdict(list)
+    for data, total in totais_mensais(municipio).items():
+        totais_por_mes[data.month].append(total)
 
     resultado = {}
     for mes, valores in totais_por_mes.items():
