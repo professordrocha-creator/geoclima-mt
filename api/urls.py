@@ -13,4 +13,5 @@ urlpatterns = [
     path("municipios/<int:municipio_id>/indicadores-fase2/", views.municipio_indicadores_fase2, name="api_municipio_indicadores_fase2"),
     path("municipios/<int:municipio_id>/series-anuais/", views.municipio_series_anuais, name="api_municipio_series_anuais"),
     path("municipios/<int:municipio_id>/exportar/", views.municipio_exportar, name="api_municipio_exportar"),
+    path("municipios/<int:municipio_id>/climatologia-ano/", views.municipio_climatologia_ano, name="api_municipio_climatologia_ano"),
 ]

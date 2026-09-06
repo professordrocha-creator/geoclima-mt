@@ -1,24 +1,42 @@
 # climate/data_import.py
 """
 Importação de arquivo (.csv ou .xlsx) de precipitação manual/de estação
-(Etapa 6). Detecta colunas pelo NOME do cabeçalho (case-insensitive,
-aceita variações comuns em português/inglês) — não exige um template
-rígido de planilha, já que cada produtor exporta os dados do jeito que
-o pluviômetro/estação dele já fornece.
+(Etapa 6, reaproveitado também pela Calculadora de Validação pública) —
+não exige um template rígido de planilha, já que cada
+produtor/pesquisador exporta os dados do jeito que o pluviômetro/
+estação dele já fornece.
 
 Colunas obrigatórias: data e valor (chuva em mm).
 Colunas opcionais: horário, observações.
+
+DETECÇÃO DE COLUNA: por RADICAL, não por lista fechada de nomes exatos
+— cada cabeçalho é normalizado (minúsculo, sem acento, sem espaço/
+underscore/parênteses/hífen: "Chuva (mm)" e "chuva_mm" viram a mesma
+chave "chuvamm") e comparado contra um conjunto de radicais conhecidos.
+Isso aceita variações que um nome fixo não cobriria ("chuva_mm",
+"PRECIPITAÇÃO_MM", "rainfall_mm", "data_medicao") sem precisar listar
+cada combinação de maiúscula/underscore/unidade que alguém possa usar.
+Achado real (usuário testou com "chuva_mm" e o sistema recusou —
+motivou esta correção).
+
+Cuidado deliberado: "prec" sozinho NÃO entra na lista de radicais de
+valor (ficaria "precip" só) — bateria também em "preço" e "precisão"
+(ambos contêm "prec" depois de normalizados), colunas que não têm nada
+a ver com chuva.
 """
 import csv
 import io
+import re
+import unicodedata
 from datetime import datetime
 
 import openpyxl
 
-COLUNAS_DATA = ["data", "date"]
-COLUNAS_VALOR = ["valor", "chuva", "precipitacao", "precipitação", "mm", "value"]
-COLUNAS_HORARIO = ["horario", "horário", "hora", "time"]
-COLUNAS_OBSERVACOES = ["observacoes", "observações", "obs", "notes", "notas"]
+# Radicais — string PRECISA CONTER um destes (não precisa ser igual).
+RADICAIS_DATA = ["data", "date", "dia"]
+RADICAIS_VALOR = ["chuv", "precip", "pluv", "rain", "ppt", "mm", "valor", "value"]
+RADICAIS_HORARIO = ["horari", "hora", "time"]
+RADICAIS_OBSERVACOES = ["observac", "obs", "notes", "nota"]
 
 FORMATOS_DATA = ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"]
 FORMATOS_HORA = ["%H:%M:%S", "%H:%M"]
@@ -47,16 +65,38 @@ def processar_arquivo(arquivo_upload):
     if not linhas:
         raise ErroImportacao("Arquivo vazio ou sem linhas de dados.")
 
-    cabecalho = [str(c).strip().lower() for c in linhas[0]]
-    indice_data = _achar_coluna(cabecalho, COLUNAS_DATA)
-    indice_valor = _achar_coluna(cabecalho, COLUNAS_VALOR)
-    indice_horario = _achar_coluna(cabecalho, COLUNAS_HORARIO)
-    indice_obs = _achar_coluna(cabecalho, COLUNAS_OBSERVACOES)
+    cabecalho_original = [str(c).strip() for c in linhas[0]]
+    cabecalho_normalizado = [_normalizar_nome_coluna(c) for c in cabecalho_original]
+
+    # Ordem importa: data e valor primeiro (obrigatórios, prioridade) —
+    # cada achado exclui esse índice das buscas seguintes, evitando a
+    # mesma coluna sendo reclamada por dois papéis diferentes.
+    indice_data = _achar_coluna(cabecalho_normalizado, RADICAIS_DATA)
+    usados = {indice_data} if indice_data is not None else set()
+
+    indice_valor = _achar_coluna(cabecalho_normalizado, RADICAIS_VALOR, excluir=usados)
+    if indice_valor is not None:
+        usados.add(indice_valor)
+
+    indice_horario = _achar_coluna(cabecalho_normalizado, RADICAIS_HORARIO, excluir=usados)
+    if indice_horario is not None:
+        usados.add(indice_horario)
+
+    indice_obs = _achar_coluna(cabecalho_normalizado, RADICAIS_OBSERVACOES, excluir=usados)
 
     if indice_data is None or indice_valor is None:
+        faltando = []
+        if indice_data is None:
+            faltando.append("data (aceita, por ex.: 'data', 'date', 'dia', 'data_medicao')")
+        if indice_valor is None:
+            faltando.append(
+                "valor de chuva (aceita, por ex.: 'valor', 'chuva', 'chuva_mm', 'precipitacao', "
+                "'pluviometria', 'rainfall_mm')"
+            )
         raise ErroImportacao(
-            f"Não encontrei colunas de data e valor no cabeçalho ({', '.join(cabecalho)}). "
-            "Use um cabeçalho com 'data'/'date' e 'valor'/'chuva'/'precipitacao'."
+            f"Não encontrei coluna de {' e de '.join(faltando)} no cabeçalho deste arquivo. "
+            f"Colunas encontradas no arquivo: {', '.join(cabecalho_original)}. "
+            "Renomeie a coluna correspondente pra um nome parecido com os aceitos e tente de novo."
         )
 
     registros = []
@@ -78,9 +118,22 @@ def processar_arquivo(arquivo_upload):
     return registros, erros
 
 
-def _achar_coluna(cabecalho, candidatos):
-    for indice, nome_coluna in enumerate(cabecalho):
-        if nome_coluna in candidatos:
+def _normalizar_nome_coluna(nome):
+    """minúsculo, sem acento, só letras/números — 'Chuva (mm)', 'chuva_mm'
+    e 'CHUVA-MM' viram a mesma chave 'chuvamm'."""
+    sem_acento = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]", "", sem_acento.lower())
+
+
+def _achar_coluna(cabecalho_normalizado, radicais, excluir=None):
+    """Primeiro índice cujo nome normalizado CONTÉM algum dos radicais —
+    não precisa ser igual (aceita 'chuva_mm', 'precipitacaomm' etc.).
+    `excluir` pula índices já reclamados por outro papel de coluna."""
+    excluir = excluir or set()
+    for indice, nome in enumerate(cabecalho_normalizado):
+        if indice in excluir:
+            continue
+        if any(radical in nome for radical in radicais):
             return indice
     return None
 

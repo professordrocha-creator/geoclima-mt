@@ -1678,3 +1678,59 @@ banco), não do calendário — o mesmo problema de fundo ainda afeta
 `anomalia_mensal`/`percentil_historico_mensal` (FASE 1), registrado
 em HISTORICO.md como pendência a confirmar com o usuário antes de
 corrigir (muda comportamento de indicadores já em produção).
+
+## 2026-09-06 — Calculadora de Validação: só município (correção metodológica) + zero armazenamento (privacy-by-design)
+
+**Contexto:** a metodologia de validação do Artigo 1
+(`climate/validation.py`, Etapa 7.2) virou uma ferramenta pública —
+pesquisador sobe o dado do pluviômetro dele, compara com o CHIRPS,
+recebe as métricas. Duas decisões de arquitetura discutidas e
+aprovadas com o usuário antes de codar, cada uma com um argumento de
+defesa explícito que vale citar na dissertação.
+
+**Decisão 1 — comparação só por MUNICÍPIO, não coordenada exata
+(nem agora, nem versão inicial).** Não é só "mais simples e sem risco
+de quota do GEE" (mesmo motivo que já levou à escolha do choropleth
+em vez de tiles GEE, ver entrada de 2026-09-01) — é a comparação
+**metodologicamente correta** pro que o CHIRPS armazenado no banco
+realmente é: uma média zonal por município (`reduceRegion`, Etapa
+3.1), não uma leitura de pixel. Comparar contra uma coordenada exata
+inventaria uma granularidade espacial que o dado no banco não tem —
+seria comparar o pluviômetro contra algo que não é, de fato, o valor
+armazenado. Coordenadas exatas ficam registradas como evolução
+futura (exigiriam consulta ao pixel via GEE ao vivo, reabrindo a
+mesma discussão de quota compartilhada com a produção).
+
+**Decisão 2 — Opção A de armazenamento: ZERO estado no servidor,
+nem temporário (privacy-by-design).** Alternativa considerada e
+descartada: guardar o resultado calculado numa sessão Django
+(`request.session`, com `set_expiry(0)` — expira ao fechar o
+navegador) entre o cálculo e a exportação, pra o usuário não precisar
+reenviar o arquivo. Tecnicamente funcionaria, mas sessão Django é
+DB-backed por padrão (tabela `django_session`) — "expira no
+navegador" é o cookie do lado do cliente ficando inválido, não a
+linha do banco desaparecendo instantaneamente (só some de fato quando
+expira e alguém roda `manage.py clearsessions`, ou o Django encontra
+e ignora a sessão vencida no próximo acesso). Isso enfraqueceria o
+argumento de privacidade da ferramenta — a calculadora existe
+justamente pra deixar o pesquisador validar o dado dele SEM
+armazenar nada, o mesmo espírito por trás de nunca ter exigido
+cadastro pra usá-la.
+
+Escolhida a **Opção A**: todo o fluxo (parse do arquivo → pareamento
+com CHIRPS → cálculo das métricas → geração do `.xlsx`) acontece num
+único request/response. O Excel é gerado em memória e embutido na
+própria página como link `data:` em base64 — o usuário recebe
+resultado + planilha de uma vez, sem reenviar nada, e **nenhuma linha
+de código grava em sessão, cache ou banco**. Isso é literalmente
+verificável (não é só uma alegação): não há nenhuma chamada a
+`request.session`, `cache.set` ou `Model.objects.create` em todo o
+fluxo da calculadora — a prova de "não armazenamos o seu dado" é o
+próprio código, não uma política escrita à parte.
+
+O único custo aceito conscientemente: se o pesquisador quiser
+recalcular ou baixar de novo depois de fechar a página, precisa
+reenviar o arquivo. Considerado um custo pequeno frente ao ganho de
+clareza ética — decisão do usuário, não uma limitação técnica que
+não dava pra contornar (a Opção B era viável, só abria mão do
+argumento mais forte).

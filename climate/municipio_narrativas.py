@@ -121,6 +121,64 @@ def interpretar_climatologia(climatologia):
     )
 
 
+def interpretar_climatologia_ano(climatologia, totais_mensais_ano, ano):
+    """
+    Compara os totais mensais de UM ano escolhido contra a faixa normal
+    histórica (P25–P75) de cada mês — conta quantos meses do ano ficaram
+    abaixo da faixa (< P25), acima (> P75), ou dentro dela, e destaca o
+    mês de MAIOR desvio absoluto em relação à mediana histórica. Só
+    descreve o que os dados JÁ mostram (nunca "vai chover"/"deve chover")
+    — é o gráfico de climatologia com ano sobreposto, apoio à decisão
+    sem previsão.
+
+    `totais_mensais_ano`: dict {mes (1-12): valor_mm} — mês sem dado
+    nesse ano simplesmente não entra na contagem. None se nenhum mês do
+    ano tiver climatologia E dado disponíveis ao mesmo tempo.
+    """
+    abaixo, acima, dentro = 0, 0, 0
+    maior_desvio = None  # (mes, desvio_absoluto, valor, normal_do_mes)
+
+    for mes in range(1, 13):
+        valor = totais_mensais_ano.get(mes)
+        normal = climatologia.get(mes)
+        if valor is None or normal is None:
+            continue
+
+        if valor < normal["p25"]:
+            abaixo += 1
+        elif valor > normal["p75"]:
+            acima += 1
+        else:
+            dentro += 1
+
+        desvio = abs(valor - normal["mediana"])
+        if maior_desvio is None or desvio > maior_desvio[1]:
+            maior_desvio = (mes, desvio, valor, normal)
+
+    total_meses_com_dado = abaixo + acima + dentro
+    if total_meses_com_dado == 0:
+        return None
+
+    def _ficar(n):
+        return "ficou" if n == 1 else "ficaram"
+
+    partes = [
+        f"Em {ano}, dos {total_meses_com_dado} meses com dado disponível: "
+        f"{abaixo} {_ficar(abaixo)} abaixo da faixa histórica normal (< P25), "
+        f"{acima} {_ficar(acima)} acima (> P75), e {dentro} dentro da faixa normal."
+    ]
+
+    if maior_desvio:
+        mes, _desvio, valor, normal = maior_desvio
+        partes.append(
+            f"O mês com maior desvio foi {_MESES_NOME[mes - 1]}, com {valor:.0f} mm "
+            f"— a mediana histórica para {_MESES_NOME[mes - 1]} é {normal['mediana']:.0f} mm "
+            f"(faixa normal: {normal['p25']:.0f}–{normal['p75']:.0f} mm)."
+        )
+
+    return " ".join(partes)
+
+
 def interpretar_tendencia_narrativa(tendencia, rotulo_aumento, rotulo_reducao):
     """
     Envolve mi.interpretar_tendencia (já existe, já usada na aba de

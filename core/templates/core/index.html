@@ -149,6 +149,7 @@
                 <small class="text-white-50 d-none d-sm-inline" style="font-size: 0.65rem; font-weight: 400;">Monitoramento de precipitação e índice de seca em Mato Grosso</small>
             </a>
             <div class="ms-auto">
+                <a href="{% url 'calculadora' %}" class="btn btn-outline-light btn-sm text-white me-2">🧮 Calculadora</a>
                 <a href="{% url 'ajuda' %}" class="btn btn-outline-light btn-sm text-white me-2">❓ Ajuda</a>
                 {% if user.is_authenticated %}
                     <a href="{% url 'dashboard:painel' %}" class="btn btn-login btn-sm text-white">👤 Meu Painel</a>
@@ -865,6 +866,12 @@
 
         // ==================== INDICADORES CLIMÁTICOS (CHIRPS) ====================
         let climatologiaChartInstance = null;
+        // Climatologia com ano sobreposto: base (P25/P75/mediana) e
+        // interpretação "mês mais chuvoso/seco" vêm de /indicadores/ (uma
+        // vez por município); os totais do ANO escolhido vêm à parte de
+        // /climatologia-ano/ (um fetch por troca de ano no dropdown).
+        let climatologiaMensalAtual = null;
+        let climatologiaInterpretacaoBaseAtual = null;
 
         // Estado do gráfico de evolução do SPI — sempre do município
         // ATUALMENTE exibido (resetado a cada renderizarIndicadoresClimaticos,
@@ -898,7 +905,7 @@
         const CONCEITOS_GRAFICOS = {
             spiIndividual: "O SPI (Índice de Precipitação Padronizada) compara a chuva de um período com o histórico da mesma região. Valores negativos indicam períodos mais secos que o normal; valores positivos, mais chuvosos; valores perto de zero, dentro do padrão normal.",
             spiTodas: "O SPI (Índice de Precipitação Padronizada) compara a chuva de um período com o histórico da mesma região. Valores negativos indicam períodos mais secos que o normal; valores positivos, mais chuvosos; valores perto de zero, dentro do padrão normal. Escalas mais curtas (SPI-1) reagem mais rápido a mudanças na chuva; escalas mais longas (SPI-12) mudam mais devagar, refletindo tendências de prazo mais longo.",
-            climatologia: "Mostra a média histórica de chuva de cada mês do ano, calculada sobre os 45 anos de dados disponíveis — o padrão típico da região ao longo do ano.",
+            climatologia: "A faixa azul mostra a variação normal histórica de chuva de cada mês (entre o 1º e o 3º quartil, calculada sobre os 45 anos de dados disponíveis) e a linha tracejada é a mediana histórica. A linha vermelha sobrepõe os totais mensais do ano escolhido no seletor, pra comparar diretamente com o que é normal para cada mês.",
             tendenciaAnual: "Cada ponto do gráfico é o total de chuva de um ano. A linha tracejada mostra a tendência de longo prazo, calculada com um teste estatístico (Mann-Kendall) que avalia se a mudança é consistente ao longo do tempo ou só variação natural.",
             diasChuvosos: "Mostra quantos dias, em cada ano, tiveram chuva acima do limiar escolhido (1, 5 ou 10mm) — indica se a chuva está distribuída em mais dias ou concentrada em menos dias.",
             intensidade: "Mostra, em cada ano, a média de chuva (mm) nos dias em que efetivamente choveu — indica se a chuva costuma ser fraca ou forte quando ocorre.",
@@ -1030,7 +1037,13 @@
                     </div>
                 </div>
                 <div class="chirps-chart-container mb-3">
-                    <h6 class="section-title mb-2">Climatologia Mensal (média histórica, mm)</h6>
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                        <h6 class="section-title mb-0">Climatologia Mensal (normal histórico × ano escolhido, mm)</h6>
+                        <div class="d-flex align-items-center gap-2">
+                            <label for="climatologiaAnoSelect" class="mb-0" style="font-size: 0.85rem;">Ano:</label>
+                            <select id="climatologiaAnoSelect" class="form-select form-select-sm" style="width: auto;"></select>
+                        </div>
+                    </div>
                     ${htmlBlocoExplicacao("climatologia")}
                     <div style="position: relative; height: 280px;">
                         <canvas id="climatologiaChart"></canvas>
@@ -1112,8 +1125,11 @@
                 <div class="chirps-info-detalhe">Histórico insuficiente ainda.</div>
             `;
 
-            renderizarGraficoClimatologia(dados.climatologia_mensal);
-            preencherExplicacao("climatologia", CONCEITOS_GRAFICOS.climatologia, dados.climatologia_interpretacao);
+            climatologiaMensalAtual = dados.climatologia_mensal;
+            climatologiaInterpretacaoBaseAtual = dados.climatologia_interpretacao;
+            renderizarGraficoClimatologia(climatologiaMensalAtual, null, null);
+            preencherExplicacao("climatologia", CONCEITOS_GRAFICOS.climatologia, climatologiaInterpretacaoBaseAtual);
+            carregarClimatologiaAno(dados.municipio.id);
 
             // --- Acumulados 7/30/90 dias ---
             const acumuladosGrid = document.getElementById("acumuladosGrid");
@@ -1125,36 +1141,127 @@
             `).join("");
         }
 
-        function renderizarGraficoClimatologia(climatologia) {
+        // Busca os totais mensais do ano escolhido (dropdown) e sobrepõe
+        // no gráfico de climatologia — a faixa normal (P25-P75) e a
+        // mediana não mudam com o ano, só a linha vermelha. Popula o
+        // <select> na primeira chamada de cada município (evita resetar a
+        // escolha do usuário a cada re-fetch do mesmo ano).
+        async function carregarClimatologiaAno(municipioId, ano) {
+            const select = document.getElementById("climatologiaAnoSelect");
+            if (!select) return;
+            try {
+                const url = ano
+                    ? `/api/municipios/${municipioId}/climatologia-ano/?ano=${ano}`
+                    : `/api/municipios/${municipioId}/climatologia-ano/`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const dados = await response.json();
+
+                if (!dados.anos_disponiveis.length) return;
+
+                if (select.dataset.municipioId !== String(municipioId)) {
+                    select.innerHTML = dados.anos_disponiveis.map(a => `<option value="${a}">${a}</option>`).join("");
+                    select.dataset.municipioId = String(municipioId);
+                    select.onchange = () => carregarClimatologiaAno(municipioId, select.value);
+                }
+                select.value = String(dados.ano);
+
+                renderizarGraficoClimatologia(climatologiaMensalAtual, dados.totais_mensais_ano, dados.ano);
+
+                const interpretacaoCombinada = [climatologiaInterpretacaoBaseAtual, dados.interpretacao]
+                    .filter(Boolean).join(" ");
+                preencherExplicacao("climatologia", CONCEITOS_GRAFICOS.climatologia, interpretacaoCombinada || null);
+            } catch (error) {
+                console.error("Erro ao carregar climatologia do ano:", error);
+            }
+        }
+
+        // Faixa normal (P25-P75, área azul) + mediana histórica (linha
+        // tracejada) + totais do ano escolhido (linha vermelha sólida,
+        // só quando `totaisAno` vem preenchido) — apoio à decisão sem
+        // previsão: mostra o que é normal pra cada mês e onde o ano
+        // escolhido caiu em relação a isso.
+        function renderizarGraficoClimatologia(climatologia, totaisAno, anoLabel) {
             const canvas = document.getElementById("climatologiaChart");
             if (!canvas) return;
 
             const labels = [];
-            const valores = [];
+            const p25 = [];
+            const p75 = [];
+            const mediana = [];
+            const valoresAno = [];
             for (let mes = 1; mes <= 12; mes++) {
                 const dado = climatologia[String(mes)];
                 labels.push(MESES_ABREV[mes - 1]);
-                valores.push(dado ? Math.round(dado.media * 10) / 10 : null);
+                p25.push(dado ? Math.round(dado.p25 * 10) / 10 : null);
+                p75.push(dado ? Math.round(dado.p75 * 10) / 10 : null);
+                mediana.push(dado ? Math.round(dado.mediana * 10) / 10 : null);
+                const valorAno = totaisAno ? totaisAno[String(mes)] : null;
+                valoresAno.push(valorAno !== null && valorAno !== undefined ? Math.round(valorAno * 10) / 10 : null);
+            }
+
+            const datasets = [
+                {
+                    // Dataset auxiliar (âncora do preenchimento) — escondido
+                    // da legenda, só serve pra "fill: '-1'" do próximo
+                    // dataset desenhar a área entre P25 e P75.
+                    label: "Faixa normal (P75)",
+                    data: p75,
+                    borderColor: "transparent",
+                    backgroundColor: "transparent",
+                    pointRadius: 0,
+                    fill: false,
+                    order: 3,
+                },
+                {
+                    label: "Faixa normal histórica (P25–P75)",
+                    data: p25,
+                    borderColor: "transparent",
+                    backgroundColor: "rgba(13, 110, 253, 0.15)",
+                    pointRadius: 0,
+                    fill: "-1",
+                    order: 3,
+                },
+                {
+                    label: "Mediana histórica",
+                    data: mediana,
+                    borderColor: "#6c757d",
+                    borderDash: [5, 5],
+                    backgroundColor: "transparent",
+                    pointRadius: 0,
+                    fill: false,
+                    order: 2,
+                },
+            ];
+
+            if (totaisAno) {
+                datasets.push({
+                    label: `Ano ${anoLabel}`,
+                    data: valoresAno,
+                    borderColor: "#d62728",
+                    backgroundColor: "#d62728",
+                    pointRadius: 3,
+                    tension: 0.2,
+                    fill: false,
+                    order: 1,
+                });
             }
 
             if (climatologiaChartInstance) {
                 climatologiaChartInstance.destroy();
             }
             climatologiaChartInstance = new Chart(canvas, {
-                type: "bar",
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: "Média histórica (mm)",
-                        data: valores,
-                        backgroundColor: "#0d6efd",
-                        borderRadius: 4,
-                    }],
-                },
+                type: "line",
+                data: { labels: labels, datasets: datasets },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            labels: { filter: (item) => item.text !== "Faixa normal (P75)" },
+                        },
+                    },
                     scales: { y: { beginAtZero: true, title: { display: true, text: "mm" } } },
                 },
             });

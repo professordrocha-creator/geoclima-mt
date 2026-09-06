@@ -10,6 +10,7 @@ from django.utils.text import slugify
 
 from climate import municipio_indicators as mi
 from climate import municipio_narrativas as nar
+from climate import trends
 from climate.models import ChirpsData
 from climate.municipio_exports import gerar_workbook_municipio
 from maps.models import Municipio
@@ -454,3 +455,51 @@ def municipio_choropleth_chuva(request):
 
     cache.set(CACHE_KEY_CHOROPLETH, resultado, CACHE_TTL_CHOROPLETH_SEGUNDOS)
     return JsonResponse(resultado)
+
+
+def municipio_climatologia_ano(request, municipio_id):
+    """
+    GET /api/municipios/<id>/climatologia-ano/?ano=2024 — totais
+    mensais de UM ano escolhido (para sobrepor à climatologia no
+    gráfico da home), a lista de anos disponíveis, e a interpretação
+    descritiva (climate.municipio_narrativas — nunca prevê, só compara
+    o ano escolhido com a faixa histórica normal). A climatologia em si
+    (faixa P25-P75 + mediana) não vem aqui — já está em /indicadores/,
+    reaproveitada no frontend sem um novo fetch.
+
+    Sem `ano` (ou `ano` fora do disponível), usa o mais recente
+    completo. Município sem nenhum ano completo devolve tudo vazio,
+    200 — nunca 500.
+    """
+    municipio = get_object_or_404(Municipio, pk=municipio_id)
+
+    anos_disponiveis = sorted(trends.totais_anuais(municipio).keys())
+    if not anos_disponiveis:
+        return JsonResponse({
+            "municipio": {"id": municipio.id, "nome": municipio.nome, "uf": municipio.uf},
+            "anos_disponiveis": [],
+            "ano": None,
+            "totais_mensais_ano": {},
+            "interpretacao": None,
+        })
+
+    try:
+        ano = int(request.GET.get("ano", anos_disponiveis[-1]))
+    except ValueError:
+        ano = anos_disponiveis[-1]
+    if ano not in anos_disponiveis:
+        ano = anos_disponiveis[-1]
+
+    totais_mensais_ano = {
+        data.month: total for data, total in trends.totais_mensais(municipio).items() if data.year == ano
+    }
+    climatologia = mi.climatologia_mensal(municipio)
+    interpretacao = nar.interpretar_climatologia_ano(climatologia, totais_mensais_ano, ano)
+
+    return JsonResponse({
+        "municipio": {"id": municipio.id, "nome": municipio.nome, "uf": municipio.uf},
+        "anos_disponiveis": anos_disponiveis,
+        "ano": ano,
+        "totais_mensais_ano": {str(mes): valor for mes, valor in totais_mensais_ano.items()},
+        "interpretacao": interpretacao,
+    })

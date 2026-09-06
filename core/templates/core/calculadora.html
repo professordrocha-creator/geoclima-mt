@@ -1,0 +1,462 @@
+{% extends "base.html" %}
+{% load l10n %}
+{% block title %}Calculadora de Validação — MonitorChuva MT{% endblock %}
+{% block extra_head %}
+<style>
+    .card-calculadora { background-color: #ffffff; border-radius: 1rem; padding: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); width: 100%; max-width: 960px; }
+    .card-calculadora h1 { font-size: 1.4rem; font-weight: 700; color: #1a1a1a; margin-bottom: 1.25rem; }
+    .dica-formato { font-size: 0.85rem; color: #6c757d; background-color: #f8f9fa; border-radius: 0.6rem; padding: 0.8rem 1rem; margin-bottom: 1.25rem; }
+
+    .resultado-secao { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #dee2e6; }
+    .amostra-aviso { background-color: #fff3cd; color: #664d03; border-radius: 0.6rem; padding: 0.8rem 1rem; margin-bottom: 1.25rem; font-size: 0.9rem; }
+    .n-pares-destaque { background-color: #e7f1ff; color: #0a3878; border-radius: 0.6rem; padding: 0.8rem 1rem; margin-bottom: 1.25rem; font-size: 1.1rem; font-weight: 700; text-align: center; }
+
+    .metrica-card { background-color: #f8f9fa; border-radius: 0.8rem; padding: 1rem; text-align: center; }
+    .metrica-card .metrica-titulo { font-size: 0.78rem; color: #6c757d; margin-bottom: 0.3rem; }
+    .metrica-card .metrica-valor { font-size: 1.4rem; font-weight: 700; color: #343a40; }
+
+    .tabela-pareada { max-height: 320px; overflow-y: auto; }
+    .tabela-pareada table { font-size: 0.85rem; }
+
+    /* Abas dos gráficos + explicação (conceito + interpretação) — mesmo
+       padrão visual já validado na home pública (core/index.html). */
+    .aba-btn.active { background-color: #0d6efd; color: #fff; border-color: #0d6efd; }
+    .aba-conteudo { display: none; }
+    .aba-conteudo.aba-ativa { display: block; }
+    .explicacao-toggle-btn { font-size: 0.78rem; color: #6c757d; background: none; border: none; padding: 0.2rem 0; cursor: pointer; text-decoration: underline dotted; }
+    .explicacao-toggle-btn:hover { color: #343a40; }
+    .explicacao-painel { background-color: #f8f9fa; border-radius: 0.6rem; padding: 0.75rem 1rem; margin: 0.4rem 0 0.75rem; font-size: 0.85rem; color: #495057; line-height: 1.5; }
+    .explicacao-painel .explicacao-rotulo { font-weight: 600; color: #343a40; }
+    .explicacao-painel > div + div { margin-top: 0.35rem; }
+
+    @media print {
+        .navbar, footer, #calculadoraFormCard, .no-print { display: none !important; }
+        .card-calculadora { box-shadow: none; padding: 0; max-width: 100%; }
+        /* No PDF (window.print), TODOS os gráficos aparecem empilhados —
+           não só a aba selecionada na tela. */
+        .aba-conteudo { display: block !important; margin-bottom: 2rem; page-break-inside: avoid; }
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card-calculadora">
+    <h1><i class="fas fa-calculator"></i> Calculadora de Validação CHIRPS × Pluviômetro</h1>
+    <p class="text-muted" style="font-size: 0.9rem;">
+        Envie a chuva medida no seu pluviômetro e compare com o CHIRPS do município escolhido — as mesmas
+        métricas de validação já usadas nesta plataforma (R², RMSE, MAE, MBE, índice d de Willmott, índice c
+        de Camargo-Sentelhas). <strong>Nada é armazenado</strong>: o cálculo acontece só nesta página, e o
+        arquivo enviado não é salvo em nenhum lugar.
+    </p>
+
+    <div id="calculadoraFormCard">
+        <div class="dica-formato">
+            <i class="fas fa-info-circle"></i> O arquivo (.csv ou .xlsx) precisa ter colunas de
+            <strong>data</strong> e <strong>valor</strong> (mm) no cabeçalho — nomes aceitos:
+            "data"/"date", "valor"/"chuva"/"precipitacao". Aceita dado <strong>diário ou totais mensais</strong>
+            — o sistema detecta automaticamente. A comparação é feita por <strong>município</strong> (o CHIRPS
+            já guardado é uma média zonal por município, não um pixel de coordenada exata).
+        </div>
+
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            {% for campo in form %}
+                <div class="mb-3">
+                    <label class="form-label">{{ campo.label }}</label>
+                    {{ campo }}
+                    {% if campo.help_text %}<div class="form-text">{{ campo.help_text }}</div>{% endif %}
+                    {% for erro in campo.errors %}<div class="text-danger small">{{ erro }}</div>{% endfor %}
+                </div>
+            {% endfor %}
+            <button type="submit" class="btn btn-primary">Calcular Validação</button>
+        </form>
+    </div>
+
+    {% if erros_linha %}
+        <div class="alert alert-warning mt-3">
+            <strong>{{ total_erros_linha }} linha(s) do arquivo ignorada(s)</strong> por não terem data/valor
+            reconhecíveis (as demais linhas foram usadas normalmente):
+            <ul class="mb-0 small">
+                {% for erro in erros_linha %}<li>{{ erro }}</li>{% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    {% if resultado %}
+        {% localize off %}
+        <div class="resultado-secao">
+            <h5 class="fw-bold mb-3">Resultado — {{ municipio.nome }}/{{ municipio.uf }}</h5>
+
+            <div class="n-pares-destaque">
+                {{ resultado.metricas.n_pares }} {% if resultado.granularidade == "diaria" %}dias{% else %}meses{% endif %} em comum entre o arquivo e o CHIRPS
+            </div>
+
+            {% if resultado.amostra_pequena %}
+                <div class="amostra-aviso">
+                    <i class="fas fa-triangle-exclamation"></i> <strong>Atenção:</strong> validação baseada em
+                    poucos pares de dados ({{ resultado.metricas.n_pares }}) — os resultados podem não ser
+                    estatisticamente representativos.
+                </div>
+            {% endif %}
+
+            <div class="row g-2 mb-4">
+                <div class="col-6 col-md-4 col-lg-2">
+                    <div class="metrica-card"><div class="metrica-titulo">R²</div><div class="metrica-valor">{{ resultado.metricas.r2|floatformat:3 }}</div></div>
+                </div>
+                <div class="col-6 col-md-4 col-lg-2">
+                    <div class="metrica-card"><div class="metrica-titulo">RMSE (mm)</div><div class="metrica-valor">{{ resultado.metricas.rmse|floatformat:2 }}</div></div>
+                </div>
+                <div class="col-6 col-md-4 col-lg-2">
+                    <div class="metrica-card"><div class="metrica-titulo">MAE (mm)</div><div class="metrica-valor">{{ resultado.metricas.mae|floatformat:2 }}</div></div>
+                </div>
+                <div class="col-6 col-md-4 col-lg-2">
+                    <div class="metrica-card"><div class="metrica-titulo">MBE (mm)</div><div class="metrica-valor">{{ resultado.metricas.mbe|floatformat:2 }}</div></div>
+                </div>
+                <div class="col-6 col-md-4 col-lg-2">
+                    <div class="metrica-card"><div class="metrica-titulo">Índice d</div><div class="metrica-valor">{{ resultado.metricas.indice_d|floatformat:3 }}</div></div>
+                </div>
+                <div class="col-6 col-md-4 col-lg-2">
+                    <div class="metrica-card"><div class="metrica-titulo">Índice c</div><div class="metrica-valor">{{ resultado.metricas.indice_c|floatformat:3 }}</div></div>
+                </div>
+            </div>
+            <p class="text-muted small">Desempenho (índice c): <strong>{{ resultado.metricas.desempenho_c }}</strong></p>
+
+            <div class="mb-3 no-print">
+                <div class="btn-group btn-group-sm flex-wrap" role="group" id="calculadoraAbasButtons">
+                    <button type="button" class="btn btn-outline-primary aba-btn active" data-aba="dispersao">Dispersão</button>
+                    <button type="button" class="btn btn-outline-primary aba-btn" data-aba="serieTemporal">Série Temporal</button>
+                    <button type="button" class="btn btn-outline-primary aba-btn" data-aba="residuos">Resíduos</button>
+                    <button type="button" class="btn btn-outline-primary aba-btn" data-aba="acumulado">Acumulado</button>
+                    <button type="button" class="btn btn-outline-primary aba-btn" data-aba="histograma">Distribuição do Erro</button>
+                    <button type="button" class="btn btn-outline-primary aba-btn" data-aba="erroMagnitude">Erro × Magnitude</button>
+                </div>
+            </div>
+
+            <div class="aba-conteudo aba-ativa mb-4" id="abaDispersao">
+                <h6 class="fw-bold mb-1">Dispersão (CHIRPS × Medido)</h6>
+                <div class="text-end">
+                    <button type="button" class="explicacao-toggle-btn" onclick="toggleExplicacao('dispersao')">ℹ️ O que este gráfico mostra</button>
+                </div>
+                <div class="explicacao-painel" id="dispersaoPainel" style="display: none;">
+                    <div><span class="explicacao-rotulo">O que é:</span> <span id="dispersaoConceito"></span></div>
+                    <div><span class="explicacao-rotulo">Neste resultado:</span> <span id="dispersaoInterpretacao">—</span></div>
+                </div>
+                <div style="position: relative; height: 320px;">
+                    <canvas id="dispersaoChart"></canvas>
+                </div>
+            </div>
+
+            <div class="aba-conteudo mb-4" id="abaSerieTemporal">
+                <h6 class="fw-bold mb-1">Série Temporal Sobreposta</h6>
+                <div class="text-end">
+                    <button type="button" class="explicacao-toggle-btn" onclick="toggleExplicacao('serieTemporal')">ℹ️ O que este gráfico mostra</button>
+                </div>
+                <div class="explicacao-painel" id="serieTemporalPainel" style="display: none;">
+                    <div><span class="explicacao-rotulo">O que é:</span> <span id="serieTemporalConceito"></span></div>
+                    <div><span class="explicacao-rotulo">Neste resultado:</span> <span id="serieTemporalInterpretacao">—</span></div>
+                </div>
+                <div style="position: relative; height: 320px;">
+                    <canvas id="serieTemporalChart"></canvas>
+                </div>
+            </div>
+
+            <div class="aba-conteudo mb-4" id="abaResiduos">
+                <h6 class="fw-bold mb-1">Resíduos ao Longo do Tempo</h6>
+                <div class="text-end">
+                    <button type="button" class="explicacao-toggle-btn" onclick="toggleExplicacao('residuos')">ℹ️ O que este gráfico mostra</button>
+                </div>
+                <div class="explicacao-painel" id="residuosPainel" style="display: none;">
+                    <div><span class="explicacao-rotulo">O que é:</span> <span id="residuosConceito"></span></div>
+                    <div><span class="explicacao-rotulo">Neste resultado:</span> <span id="residuosInterpretacao">—</span></div>
+                </div>
+                <div style="position: relative; height: 320px;">
+                    <canvas id="residuosChart"></canvas>
+                </div>
+            </div>
+
+            <div class="aba-conteudo mb-4" id="abaAcumulado">
+                <h6 class="fw-bold mb-1">Acumulado Comparado</h6>
+                <div class="text-end">
+                    <button type="button" class="explicacao-toggle-btn" onclick="toggleExplicacao('acumulado')">ℹ️ O que este gráfico mostra</button>
+                </div>
+                <div class="explicacao-painel" id="acumuladoPainel" style="display: none;">
+                    <div><span class="explicacao-rotulo">O que é:</span> <span id="acumuladoConceito"></span></div>
+                    <div><span class="explicacao-rotulo">Neste resultado:</span> <span id="acumuladoInterpretacao">—</span></div>
+                </div>
+                <div style="position: relative; height: 320px;">
+                    <canvas id="acumuladoChart"></canvas>
+                </div>
+            </div>
+
+            <div class="aba-conteudo mb-4" id="abaHistograma">
+                <h6 class="fw-bold mb-1">Distribuição do Erro</h6>
+                <div class="text-end">
+                    <button type="button" class="explicacao-toggle-btn" onclick="toggleExplicacao('histograma')">ℹ️ O que este gráfico mostra</button>
+                </div>
+                <div class="explicacao-painel" id="histogramaPainel" style="display: none;">
+                    <div><span class="explicacao-rotulo">O que é:</span> <span id="histogramaConceito"></span></div>
+                    <div><span class="explicacao-rotulo">Neste resultado:</span> <span id="histogramaInterpretacao">—</span></div>
+                </div>
+                <div style="position: relative; height: 320px;">
+                    <canvas id="histogramaChart"></canvas>
+                </div>
+            </div>
+
+            <div class="aba-conteudo mb-4" id="abaErroMagnitude">
+                <h6 class="fw-bold mb-1">Erro × Magnitude</h6>
+                <div class="text-end">
+                    <button type="button" class="explicacao-toggle-btn" onclick="toggleExplicacao('erroMagnitude')">ℹ️ O que este gráfico mostra</button>
+                </div>
+                <div class="explicacao-painel" id="erroMagnitudePainel" style="display: none;">
+                    <div><span class="explicacao-rotulo">O que é:</span> <span id="erroMagnitudeConceito"></span></div>
+                    <div><span class="explicacao-rotulo">Neste resultado:</span> <span id="erroMagnitudeInterpretacao">—</span></div>
+                </div>
+                <div style="position: relative; height: 320px;">
+                    <canvas id="erroMagnitudeChart"></canvas>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 mb-3 no-print">
+                <a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{{ excel_base64 }}"
+                   download="{{ nome_arquivo_excel }}" class="btn btn-outline-success">
+                    <i class="fas fa-file-excel"></i> Baixar Excel
+                </a>
+                <button type="button" class="btn btn-outline-secondary" onclick="window.print()">
+                    <i class="fas fa-print"></i> Imprimir / Salvar como PDF
+                </button>
+            </div>
+
+            <h6 class="fw-bold">Dados Pareados</h6>
+            <div class="tabela-pareada">
+                <table class="table table-sm table-striped">
+                    <thead><tr><th>Data</th><th>CHIRPS (mm)</th><th>Medido (mm)</th><th>Diferença</th></tr></thead>
+                    <tbody>
+                        {% for linha in pares_tabela %}
+                        <tr><td>{{ linha.data|date:"d/m/Y" }}</td><td>{{ linha.chirps|floatformat:2 }}</td><td>{{ linha.local|floatformat:2 }}</td><td>{{ linha.diferenca|floatformat:2 }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <script id="dadosGraficosCalculadora" type="application/json">{{ dados_graficos_json|safe }}</script>
+        <script id="interpretacoesCalculadora" type="application/json">{{ interpretacoes_json|safe }}</script>
+        {% endlocalize %}
+    {% endif %}
+</div>
+{% endblock %}
+{% block extra_scripts %}
+{% if resultado %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+    (function () {
+        const dados = JSON.parse(document.getElementById("dadosGraficosCalculadora").textContent);
+        const interpretacoes = JSON.parse(document.getElementById("interpretacoesCalculadora").textContent);
+        const pares = dados.pares; // [{data, chirps, local, diferenca}, ...], já ordenado por data
+        const granularidade = dados.granularidade;
+
+        // ==================== Conceito (fixo) + interpretação (dinâmica) ====================
+        const CONCEITOS_CALCULADORA = {
+            dispersao: "Cada ponto é um par de valores (CHIRPS × medido) no mesmo dia/mês. Quanto mais perto da linha diagonal tracejada, maior a concordância entre as duas fontes nesse ponto.",
+            serieTemporal: "As duas séries de chuva (CHIRPS e medida no pluviômetro) lado a lado ao longo do tempo — mostra em que datas elas se aproximam e em que datas se afastam.",
+            residuos: "Cada barra é a diferença (CHIRPS − medido) num dia/mês. Barras acima de zero indicam que o CHIRPS superestimou a chuva medida naquele período; abaixo de zero, subestimou.",
+            acumulado: "Soma progressiva da chuva de cada fonte ao longo do período. Mostra se as diferenças de cada dia/mês se cancelam no total acumulado ou se somam sempre na mesma direção.",
+            histograma: "Quantas vezes a diferença (CHIRPS − medido) caiu em cada faixa de valores. O formato da distribuição mostra se o erro costuma ser pequeno e simétrico ou deslocado numa direção — informação que RMSE e MAE, sendo só um número, não mostram.",
+            erroMagnitude: "Compara o tamanho do erro (CHIRPS − medido) com o valor efetivamente medido no pluviômetro. Se o erro cresce ou diminui conforme a chuva medida aumenta, isso é chamado de viés condicional — a precisão do CHIRPS muda dependendo da intensidade da chuva, em vez de ser constante.",
+        };
+
+        function toggleExplicacao(idBase) {
+            const painel = document.getElementById(`${idBase}Painel`);
+            if (!painel) return;
+            painel.style.display = painel.style.display === "none" ? "block" : "none";
+        }
+        window.toggleExplicacao = toggleExplicacao;
+
+        function preencherExplicacao(idBase) {
+            const elConceito = document.getElementById(`${idBase}Conceito`);
+            const elInterpretacao = document.getElementById(`${idBase}Interpretacao`);
+            if (elConceito) elConceito.textContent = CONCEITOS_CALCULADORA[idBase];
+            if (elInterpretacao) {
+                elInterpretacao.textContent = interpretacoes[idBase] || "Não foi possível gerar essa leitura com os dados enviados.";
+            }
+        }
+        Object.keys(CONCEITOS_CALCULADORA).forEach(preencherExplicacao);
+
+        // ==================== Abas ====================
+        const MESES_ABREV = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+        function formatarRotuloData(iso) {
+            const [ano, mes, dia] = iso.split("-").map(Number);
+            return granularidade === "mensal" ? `${MESES_ABREV[mes - 1]}/${ano}` : `${String(dia).padStart(2, "0")}/${String(mes).padStart(2, "0")}`;
+        }
+
+        const graficosInstancias = {};
+
+        document.querySelectorAll(".aba-btn").forEach(botao => {
+            botao.addEventListener("click", () => {
+                document.querySelectorAll(".aba-btn").forEach(b => b.classList.remove("active"));
+                document.querySelectorAll(".aba-conteudo").forEach(c => c.classList.remove("aba-ativa"));
+                botao.classList.add("active");
+                const aba = botao.dataset.aba;
+                document.getElementById(`aba${aba.charAt(0).toUpperCase()}${aba.slice(1)}`).classList.add("aba-ativa");
+                // Chart.js só calcula o tamanho certo do canvas quando o
+                // container está visível — força o recálculo ao trocar de aba
+                // (o gráfico já existe, criado no carregamento da página).
+                if (graficosInstancias[aba]) graficosInstancias[aba].resize();
+            });
+        });
+
+        // No PDF (window.print), todas as abas viram visíveis via CSS antes
+        // da captura — resize() em todos garante que nenhum gráfico fique
+        // com o tamanho de quando estava escondido (0px).
+        window.addEventListener("beforeprint", () => {
+            Object.values(graficosInstancias).forEach(chart => chart && chart.resize());
+        });
+
+        // ==================== 1. Dispersão (CHIRPS × Medido) ====================
+        (function () {
+            const dadosDispersao = pares.map(p => ({ x: p.chirps, y: p.local }));
+            const todosValores = pares.flatMap(p => [p.chirps, p.local]);
+            const minimo = Math.min(...todosValores, 0);
+            const maximo = Math.max(...todosValores);
+
+            graficosInstancias.dispersao = new Chart(document.getElementById("dispersaoChart"), {
+                data: {
+                    datasets: [
+                        { type: "scatter", label: "Pares CHIRPS × Medido", data: dadosDispersao, backgroundColor: "rgba(13, 110, 253, 0.6)" },
+                        { type: "line", label: "Referência (CHIRPS = Medido)", data: [{ x: minimo, y: minimo }, { x: maximo, y: maximo }], borderColor: "#dc3545", borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, position: "top" } },
+                    scales: {
+                        x: { title: { display: true, text: "CHIRPS (mm)" } },
+                        y: { title: { display: true, text: "Medido no pluviômetro (mm)" } },
+                    },
+                },
+            });
+        })();
+
+        // ==================== 2. Série Temporal Sobreposta ====================
+        (function () {
+            const labels = pares.map(p => formatarRotuloData(p.data));
+            graficosInstancias.serieTemporal = new Chart(document.getElementById("serieTemporalChart"), {
+                type: "line",
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: "CHIRPS (mm)", data: pares.map(p => p.chirps), borderColor: "#0d6efd", backgroundColor: "#0d6efd", pointRadius: 2, tension: 0.15 },
+                        { label: "Medido (mm)", data: pares.map(p => p.local), borderColor: "#d62728", backgroundColor: "#d62728", pointRadius: 2, tension: 0.15 },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, position: "top" } },
+                    scales: { y: { title: { display: true, text: "mm" } } },
+                },
+            });
+        })();
+
+        // ==================== 3. Resíduos ao Longo do Tempo ====================
+        (function () {
+            const labels = pares.map(p => formatarRotuloData(p.data));
+            const valores = pares.map(p => p.diferenca);
+            const cores = valores.map(v => v >= 0 ? "rgba(220, 53, 69, 0.7)" : "rgba(13, 110, 253, 0.7)");
+
+            graficosInstancias.residuos = new Chart(document.getElementById("residuosChart"), {
+                type: "bar",
+                data: { labels: labels, datasets: [{ label: "Diferença CHIRPS − Medido (mm)", data: valores, backgroundColor: cores, borderRadius: 3 }] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { title: { display: true, text: "mm" } } },
+                },
+            });
+        })();
+
+        // ==================== 4. Acumulado Comparado ====================
+        (function () {
+            const labels = pares.map(p => formatarRotuloData(p.data));
+            let acumuladoChirps = 0;
+            let acumuladoLocal = 0;
+            const serieAcumuladaChirps = pares.map(p => (acumuladoChirps += p.chirps));
+            const serieAcumuladaLocal = pares.map(p => (acumuladoLocal += p.local));
+
+            graficosInstancias.acumulado = new Chart(document.getElementById("acumuladoChart"), {
+                type: "line",
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: "CHIRPS acumulado (mm)", data: serieAcumuladaChirps, borderColor: "#0d6efd", backgroundColor: "#0d6efd", pointRadius: 0 },
+                        { label: "Medido acumulado (mm)", data: serieAcumuladaLocal, borderColor: "#d62728", backgroundColor: "#d62728", pointRadius: 0 },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, position: "top" } },
+                    scales: { y: { title: { display: true, text: "mm acumulados" } } },
+                },
+            });
+        })();
+
+        // ==================== 5. Distribuição do Erro (Histograma) ====================
+        (function () {
+            const faixas = dados.histograma || [];
+            // Evita rótulo "-0.0" (valor real ligeiramente negativo que
+            // arredonda pra zero na 1ª casa decimal) — só cosmético.
+            const fmtFaixa = (v) => { const s = v.toFixed(1); return s === "-0.0" ? "0.0" : s; };
+            const labels = faixas.map(f => `${fmtFaixa(f.inicio)} a ${fmtFaixa(f.fim)}`);
+            const contagens = faixas.map(f => f.contagem);
+            // Faixas que contêm o zero destacadas em cinza (erro pequeno);
+            // as demais em vermelho (mesma cor de "superestimou" nas outras
+            // abas), já que aqui o sinal da faixa não é o foco, é a forma.
+            const cores = faixas.map(f => (f.inicio <= 0 && f.fim >= 0) ? "#6c757d" : "rgba(220, 53, 69, 0.7)");
+
+            graficosInstancias.histograma = new Chart(document.getElementById("histogramaChart"), {
+                type: "bar",
+                data: { labels: labels, datasets: [{ label: "Nº de pares", data: contagens, backgroundColor: cores, borderRadius: 3 }] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { title: { display: true, text: "Diferença CHIRPS − Medido (mm)" } },
+                        y: { title: { display: true, text: "Nº de pares" }, ticks: { precision: 0 } },
+                    },
+                },
+            });
+        })();
+
+        // ==================== 6. Erro × Magnitude ====================
+        (function () {
+            const dadosErro = pares.map(p => ({ x: p.local, y: p.diferenca }));
+            const minimoLocal = Math.min(...pares.map(p => p.local), 0);
+            const maximoLocal = Math.max(...pares.map(p => p.local));
+
+            graficosInstancias.erroMagnitude = new Chart(document.getElementById("erroMagnitudeChart"), {
+                data: {
+                    datasets: [
+                        { type: "scatter", label: "Erro × Chuva Medida", data: dadosErro, backgroundColor: "rgba(13, 110, 253, 0.6)" },
+                        { type: "line", label: "Erro zero (referência)", data: [{ x: minimoLocal, y: 0 }, { x: maximoLocal, y: 0 }], borderColor: "#6c757d", borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, position: "top" } },
+                    scales: {
+                        x: { title: { display: true, text: "Medido no pluviômetro (mm)" } },
+                        y: { title: { display: true, text: "Erro: CHIRPS − Medido (mm)" } },
+                    },
+                },
+            });
+        })();
+    })();
+</script>
+{% endif %}
+{% endblock %}

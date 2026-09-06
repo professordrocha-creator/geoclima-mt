@@ -3,6 +3,273 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-09-06 (continuação 6) — Calculadora de Validação ganha 5 gráficos novos (série temporal, resíduos, acumulado, histograma do erro, erro×magnitude)
+
+**Contexto**: a calculadora (continuação 3) só tinha o gráfico de
+dispersão e a tabela de pares. Pedido do usuário, com 3 propostas
+próprias avaliadas antes de implementar (investigação/proposta
+registrada na conversa, não em arquivo separado): acrescentar gráficos
+que sirvam à VALIDAÇÃO (concordância/discordância entre CHIRPS e
+pluviômetro), não à análise climática de longo prazo — SPI, tendência
+Mann-Kendall, climatologia e veranicos foram descartados de propósito
+(exigem 30-45 anos; a calculadora recebe tipicamente meses).
+
+**6 gráficos ao todo, organizados em abas** (`core/templates/core/
+calculadora.html`): Dispersão (existente, ganhou ℹ️ pela primeira vez),
+Série Temporal Sobreposta, Resíduos ao Longo do Tempo (barras coloridas
+por sinal), Acumulado Comparado (duas curvas crescentes, não double
+mass curve — mais legível pro público-alvo), Distribuição do Erro
+(histograma, 10 faixas) e Erro × Magnitude (dispersão do erro contra o
+valor MEDIDO — convenção da literatura de validação: resíduo no eixo Y
+contra o observado no eixo X, não o estimado; é o gráfico que revela
+viés condicional). Boxplot por faixa de intensidade foi descartado
+(Chart.js não tem boxplot nativo, exigiria plugin novo, e amostras
+mensais pequenas dariam bins vazios) — Erro × Magnitude cobre o mesmo
+propósito diagnóstico sem essas duas desvantagens.
+
+**Backend**: `climate/calculadora_validacao.py` ganhou
+`histograma_diferencas(pares, n_faixas=10)` (binning simples por
+amplitude mínimo-máximo, incluído no dict devolvido por
+`calcular_validacao` como `"histograma"`). Novo módulo
+`climate/calculadora_narrativas.py` (mesmo espírito de
+`climate/municipio_narrativas.py` da Home: descreve, nunca prevê nem
+prescreve) gera a interpretação dinâmica dos 6 gráficos — a única conta
+nova é a correlação (Pearson) entre o valor medido e o erro, pro
+Erro×Magnitude. `core/views.py:calculadora` monta um único blob JSON
+(`dados_graficos_json`, via `json.dumps` no Python — não mais
+interpolação de float direto no template, eliminando de vez a
+armadilha da vírgula do pt-br pra este bloco) com os pares e o
+histograma; o JS deriva os 6 formatos de gráfico a partir dele, sem
+recalcular nada. Segue Opção A (zero armazenamento) sem mudança.
+
+**Excel** (`climate/calculadora_exports.py`): aba "Dados Pareados"
+ganhou colunas de acumulado (CHIRPS/Medido); nova aba "Distribuição do
+Erro" com as faixas do histograma — 4 abas ao todo agora.
+
+**Bug cosmético pego e corrigido antes de fechar**: faixas do
+histograma com limite ligeiramente negativo (ex.: -0.0001mm) apareciam
+como "-0.0" tanto na interpretação em texto quanto no rótulo do
+gráfico e na planilha Excel — corrigido com um helper
+(`_fmt1`/`_fmt2`/`fmtFaixa`, um em cada camada) que troca "-0.0"/"-0.00"
+por "0.0"/"0.00" só na hora de formatar (o valor usado no cálculo em si
+não muda).
+
+**Testado** com dois cenários sintéticos reais (construídos a partir
+de CHIRPS real de Cáceres, não inventados): (1) 90 dias, `local =
+chirps × 0.8` — CHIRPS superestima proporcionalmente mais em chuvas
+fortes; Erro×Magnitude corretamente reportou "r=1.00 ... o CHIRPS tende
+a superestimar cada vez mais conforme a chuva medida aumenta"; Acumulado
+corretamente identificou erro sistemático (não compensa). (2) 5 meses,
+`local = chirps × 1.15` (amostra pequena, dispara o aviso de <30
+pares) — direção invertida, Erro×Magnitude reportou "r=-1.00 ... tende
+a subestimar cada vez mais", Resíduos reportou 100% de subestimativa,
+condizente com o dado sintético. Round-trip HTTP completo via Node
+(POST multipart real contra o container rodando, csrftoken/cookie
+reais, não simulado) nos dois cenários, mais leitura da planilha Excel
+exportada via `openpyxl` pra confirmar as colunas novas e a correção do
+"-0.00". `node --check` no `<script>` inline extraído do template,
+`manage.py check` limpo. Não tocou home nem painel privado.
+
+**PDF (window.print)**: as 6 abas usam `display:none`/`.aba-ativa` na
+tela (só uma visível por vez) mas uma regra `@media print` força
+`.aba-conteudo { display: block !important }` em todas simultaneamente
+— o botão de imprimir sempre gera o PDF com os 6 gráficos empilhados,
+não só a aba selecionada no navegador. Como os canvases dos gráficos
+escondidos nasceram com `display:none` (Chart.js pode calcular
+tamanho 0 nesse caso), um listener de `beforeprint` chama
+`.resize()` em todas as 6 instâncias assim que o CSS de impressão já
+aplicou, garantindo que nenhum gráfico fique cortado/borrado no PDF —
+mecanismo verificado por inspeção do código (CSS + listener presentes
+e corretos), não visualmente: sessão sem ferramenta de navegador,
+mesma limitação já registrada nas entradas anteriores.
+
+## 2026-09-06 (continuação 5) — Climatologia Mensal evolui pra "normal histórico × ano escolhido" (faixa P25-P75 + mediana + ano sobreposto)
+
+**Pedido do usuário**: acrescentar apoio à decisão não-preditivo do tipo
+"o normal para esta época é X mm; o ano Y está acima/abaixo disso" —
+decidido junto que a forma certa era EVOLUIR o gráfico "Climatologia
+Mensal" já existente na home pública (em vez de criar um 9º gráfico
+redundante), sobrepondo o ano escolhido pelo usuário à faixa normal
+histórica já calculada.
+
+**Backend** (sem migração, sem cálculo novo — só composição do que já
+existia): `climate/municipio_narrativas.py` ganhou
+`interpretar_climatologia_ano(climatologia, totais_mensais_ano, ano)` —
+conta quantos meses do ano ficaram abaixo (< P25), acima (> P75) ou
+dentro da faixa normal histórica de cada mês, e destaca o mês de maior
+desvio absoluto em relação à mediana. `api/views.py` ganhou
+`municipio_climatologia_ano`, nova rota
+`GET /api/municipios/<id>/climatologia-ano/?ano=AAAA` (ano opcional,
+default o mais recente disponível) — devolve `anos_disponiveis` (pra
+popular o dropdown), `totais_mensais_ano` e a interpretação. Reaproveita
+`climate.trends.totais_anuais`/`totais_mensais` (já existiam desde a
+Etapa 10) sem duplicar lógica.
+
+**Frontend** (`core/templates/core/index.html`): o gráfico
+"Climatologia Mensal" trocou de barra pra linha — faixa azul
+preenchida entre P25 e P75 (truque Chart.js: dataset de P75 invisível
+como âncora + dataset de P25 com `fill: '-1'`), linha tracejada cinza
+da mediana histórica, e linha vermelha sólida com o total mensal do ano
+escolhido no novo `<select id="climatologiaAnoSelect">` (populado a
+partir de `anos_disponiveis`, um fetch por troca de ano — a faixa/
+mediana não mudam, só a linha do ano). O bloco de explicação (ℹ️) segue
+o mesmo padrão dos outros 8 gráficos (`htmlBlocoExplicacao`/
+`preencherExplicacao`), com a interpretação combinando o texto fixo
+"mês mais chuvoso/seco histórico" (já existia) com o novo texto
+específico do ano escolhido.
+
+**Bug de concordância pego antes de mostrar ao usuário**: a frase gerada
+tinha "1 ficaram acima" (deveria ser "1 ficou acima") quando a contagem
+de um dos três grupos (abaixo/acima/dentro) era exatamente 1 — corrigido
+com um helper `_ficar(n)` que escolhe singular/plural pela contagem.
+
+**Testado**: endpoint validado via Node contra o container real,
+especificamente Cáceres/2024 (ano de seca severa, pedido explícito do
+usuário pra conferir se a leitura capturava isso) —
+*"Em 2024, dos 12 meses com dado disponível: 9 ficaram abaixo da faixa
+histórica normal (< P25), 1 ficou acima (> P75), e 2 dentro da faixa
+normal. O mês com maior desvio foi janeiro, com 155 mm — a mediana
+histórica para janeiro é 215 mm (faixa normal: 166–254 mm)."* — captura
+bem a severidade (9 de 12 meses abaixo do normal). Confirmado que o
+dropdown sem `?ano=` volta o ano mais recente disponível (2025 pra
+Cáceres) e que os valores de P25/mediana/P75/ano batem mês a mês contra
+o dado bruto. `node --check` no bloco `<script>` inteiro extraído do
+template, `manage.py check` limpo, HTML da home confirmado servindo o
+novo `<select>`/`<canvas>`. Não tocou painel privado nem calculadora.
+
+## 2026-09-06 (continuação 4) — Reconhecimento de coluna do upload por RADICAL, não lista fechada (bug real reportado pelo usuário)
+
+**Contexto:** usuário testou a calculadora (entrada anterior) com um
+arquivo de exemplo real — cabeçalho `data`/`chuva_mm` — e o sistema
+recusou: `"Não encontrei colunas de data e valor no cabeçalho (data,
+chuva_mm)"`. `climate/data_import.py` (Etapa 6) só aceitava uma lista
+fechada de nomes EXATOS pra coluna de valor (`valor`, `chuva`,
+`precipitacao`, `precipitação`, `mm`, `value`) — `chuva_mm`, um nome
+perfeitamente natural (inclui a unidade, boa prática), não batia com
+nenhum.
+
+**Correção**: detecção por RADICAL em vez de lista exata. Cabeçalho
+normalizado (`_normalizar_nome_coluna` — minúsculo, sem acento, só
+letras/números: `"Chuva (mm)"`, `"chuva_mm"` e `"CHUVA-MM"` viram a
+mesma chave `"chuvamm"`) e comparado contra conjuntos de radicais
+(`RADICAIS_VALOR = ["chuv", "precip", "pluv", "rain", "ppt", "mm",
+"valor", "value"]`, `RADICAIS_DATA = ["data", "date", "dia"]`) — a
+coluna só precisa CONTER um radical, não ser igual a ele. `_achar_coluna`
+ganhou parâmetro `excluir` (índices já reclamados por outro papel —
+data e valor primeiro, prioridade, depois horário/observações), pra
+uma coluna não virar dois papéis ao mesmo tempo.
+
+**Cuidado deliberado contra falso-positivo, registrado no docstring**:
+`"prec"` sozinho NÃO entra na lista (ficou só `"precip"`, mais
+específico) — bateria também em `"preço"` e `"precisão"` depois de
+normalizados (ambos contêm "prec"), colunas sem nenhuma relação com
+chuva.
+
+**Regressão real pega no próprio teste, corrigida antes de finalizar**:
+ao trocar a lista exata pela lista de radicais, esqueci de recriar um
+equivalente pra `"value"` (inglês) — `"valor"` não é substring de
+`"value"` (letras diferentes depois de "val"), então colunas chamadas
+exatamente `"value"` passaram a ser rejeitadas, um retrocesso real que
+só apareceu ao rodar a bateria de testes de regressão. Corrigido
+adicionando `"value"` de volta à lista de radicais.
+
+**Mensagem de erro melhorada**: agora lista os nomes aceitos (com
+exemplos) E as colunas que o arquivo realmente tem, em vez de só
+ecoar o cabeçalho cru sem dizer o que fazer:
+> *"Não encontrei coluna de data (aceita, por ex.: 'data', 'date',
+> 'dia', 'data_medicao') e de valor de chuva (aceita, por ex.:
+> 'valor', 'chuva', 'chuva_mm', 'precipitacao', 'pluviometria',
+> 'rainfall_mm') no cabeçalho deste arquivo. Colunas encontradas no
+> arquivo: estacao, observacoes. Renomeie a coluna correspondente pra
+> um nome parecido com os aceitos e tente de novo."*
+
+**Testado** (22 variações de coluna de valor + 6 de data + a mensagem
+de erro): `chuva_mm`, `Chuva (mm)`, `PRECIPITACAO`, `rainfall_mm`,
+`valor`, `chuva`, `precipitacao`, `precipitação`, `mm`, `value`,
+`pluviometria`, `pluviometro`, `ppt`, `rain`, `precip`, `valor_mm` —
+todos aceitos; `observacoes`, `estacao`, `nome`, `preco`, `precisao`,
+`latitude` — todos corretamente rejeitados (nenhum falso-positivo);
+`data`, `date`, `dia`, `data_medicao`, `DataHora`, `Data (medição)` —
+todos aceitos como coluna de data. Testado também via HTTP real na
+Calculadora (upload de `.xlsx` de verdade com o cabeçalho exato do bug
+reportado) — passou. `climate/data_import.py` é compartilhado com o
+import manual do painel privado (Etapa 6) — a correção beneficia os
+dois, sem alterar nenhuma view/template do painel. `manage.py check`
+limpo.
+
+## 2026-09-06 (continuação 3) — Calculadora de Validação CHIRPS × Pluviômetro (pública, sem login, fora do PDF original)
+
+**Contexto:** a metodologia de validação do Artigo 1 (Etapa 7.2,
+`climate/validation.py`) virando ferramenta pública — qualquer
+pesquisador sobe um arquivo com a chuva medida no pluviômetro dele,
+compara com o CHIRPS de um município, recebe as mesmas métricas
+(R², RMSE, MAE, MBE, índice d, índice c), sem cadastrar nada. Plano
+investigado e aprovado em 2 rodadas antes de codar (granularidade
+diária+mensal com detecção automática; comparação só por município,
+não coordenada exata; Opção A de armazenamento — zero estado no
+servidor, nem temporário).
+
+**Reaproveitamento** — nenhuma métrica, parser ou agregação nova:
+`climate.validation.calcular_metricas` (Etapa 7.2, sem alterar),
+`climate.data_import.processar_arquivo` (Etapa 6, sem alterar — já
+detecta colunas por nome, trata linha ruim sem derrubar o resto),
+`climate.trends.totais_mensais` (sem alterar), `CITACAO_CHIRPS` de
+`climate/municipio_exports.py` (importada, não duplicada).
+
+**Novo** (só o que realmente não existia): `climate/calculadora_validacao.py`
+— `detectar_granularidade` (mediana do intervalo entre datas
+consecutivas: ~1 dia = diária, ~28-31 dias = mensal), `parear_diario`/
+`parear_mensal` (casam o arquivo do usuário com `ChirpsData`/
+`totais_mensais` do município escolhido), `calcular_validacao`
+(orquestra tudo). `climate/calculadora_exports.py` — workbook de 3
+abas (Metadados, Métricas, Dados Pareados), mesmo padrão
+`Workbook()`/`_nova_aba()` de `farms/exports.py`/`municipio_exports.py`.
+
+**Aviso de amostra pequena** (pedido do usuário, mesma filosofia da
+nota de mês seco na anomalia — nunca esconde, nunca bloqueia, sempre
+avisa): `MINIMO_PARES_AMOSTRA_CONFIAVEL = 30` — abaixo disso o
+resultado aparece normalmente, mas com um aviso amarelo destacado.
+O nº de pares usado (`n_pares`) sempre aparece em destaque acima das
+métricas, independente do tamanho — padrão de literatura de validação
+(sempre reportar o n).
+
+**Armazenamento — Opção A, implementada literalmente**: `core/views.py:calculadora`
+processa tudo num único request/response — parse → pareamento →
+métricas → geração do `.xlsx` em `BytesIO` → base64 — e embute o
+Excel como link `<a download href="data:...;base64,...">` na própria
+página de resultado. **Nenhuma linha toca sessão, cache ou banco** pra
+guardar o resultado; se o usuário quiser recalcular ou exportar de
+novo, reenvia o arquivo. PDF continua sem servidor nenhum: mesma
+página, `window.print()` + CSS `@media print` (mesma decisão da
+Etapa 11, WeasyPrint continua fora).
+
+**Estrutura**: sem app novo — `core` já é o app das páginas públicas
+soltas (`home`, `ajuda`). `core/forms.py` (novo, `core` não tinha
+forms ainda) com `CalculadoraValidacaoForm` (município `ativo=True` +
+upload). Rota `/calculadora/`, linkada nas duas navbars (`base.html` e
+a navbar própria da Home).
+
+**Testado com viés sintético conhecido** (mesma técnica já usada pra
+validar `climate/correction.py`, Etapa 7.4) — CHIRPS real de Cáceres
+(jan/2020, 31 dias) + viés constante de +10mm no "medido": resultado
+bateu **exatamente** com um cálculo manual INDEPENDENTE (reimplementado
+do zero no script de teste, não só re-rodando a mesma fórmula):
+`n=31, MBE=-10.0000, RMSE=10.0000, MAE=10.0000, R²=1.000000,
+índice d=0.551963`. Achado interessante que vale registrar: mesmo com
+correlação perfeita (R²=1.0, já que um viés constante não afeta
+correlação), o índice d de Willmott caiu pra "sofrível" — o índice
+captura corretamente que uma correlação perfeita não significa
+concordância absoluta quando há viés sistemático, exatamente o
+comportamento esperado da literatura.
+
+Testado também via HTTP real (`curl` com upload de `.xlsx` de verdade,
+não só chamada de função): granularidade diária (31 dias) e mensal
+(12 meses de totais) ambas detectadas corretamente; arquivo de 10
+dias disparou o aviso de amostra pequena como esperado; link de
+download do Excel presente e com base64 válido no HTML. `manage.py
+check` limpo. Sem ferramenta de navegador nesta sessão — validado por
+inspeção da resposta HTML real, não por clique na tela.
+
 ## 2026-09-06 (continuação 2) — Clareza do mapa choropleth: limites de navegação, credibilidade do dado, legenda explicada
 
 **Contexto:** pedido do usuário — o mapa deixava navegar pra fora de
