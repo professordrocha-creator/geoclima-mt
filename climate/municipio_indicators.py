@@ -43,7 +43,7 @@ import statistics
 from datetime import timedelta
 
 from django.core.cache import cache
-from django.db.models import Sum
+from django.db.models import Max, Sum
 from django.db.models.functions import TruncYear
 from django.utils import timezone
 
@@ -102,15 +102,67 @@ def _com_cache(chave, calcular):
     return resultado
 
 
-def _ultimo_mes_completo():
-    """(ano, mes) do último mês CIVIL completo — exclui o mês corrente
-    (sempre parcial), mesmo critério de totais_anuais/normais_climatologicas
-    em climate/trends.py."""
-    hoje = timezone.localdate()
-    ano, mes = hoje.year, hoje.month - 1
-    if mes == 0:
-        ano, mes = ano - 1, 12
-    return ano, mes
+def _ultima_data_chirps(municipio=None):
+    """
+    Data mais recente REALMENTE publicada no CHIRPS — base única de
+    "qual é o presente de verdade" pro módulo inteiro, em vez de cada
+    função assumir que o relógio do sistema bate com a publicação do
+    CHIRPS (não bate sempre: CHIRPS tem defasagem própria de
+    publicação, ver docs/DECISOES.md — achado real desta sessão, não
+    hipotético).
+
+    `municipio=None` consulta os 142 municípios de MT juntos (usado
+    pelo choropleth, que precisa de UM período comum pro mapa
+    inteiro); passando um município específico, consulta só a série
+    dele (usado pelos indicadores por-município abaixo).
+    """
+    qs = ChirpsData.objects.filter(municipio=municipio) if municipio is not None else ChirpsData.objects.filter(municipio__uf="MT")
+    return qs.aggregate(ultima=Max("date"))["ultima"]
+
+
+def _ultimo_mes_completo_com_dado(municipio=None):
+    """
+    (ano, mes) do último mês CIVIL completo com CHIRPS REALMENTE
+    publicado — substitui a antiga _ultimo_mes_completo (calendário de
+    HOJE menos 1 mês), que quebrava sempre que o relógio do sistema
+    virasse o mês antes do CHIRPS publicar o mês anterior inteiro
+    (achado real: sistema em setembro, CHIRPS só até 31/07 — toda
+    função que dependia do calendário passou a devolver "sem dado"
+    pra tudo). Fonte única de verdade, reaproveitada pelo choropleth
+    E pelos indicadores por-município (anomalia_mensal,
+    percentil_historico_mensal) — uma implementação só.
+    """
+    ultima_data = _ultima_data_chirps(municipio)
+    if ultima_data is None:
+        return None, None
+
+    primeiro_dia_mes_seguinte = (ultima_data.replace(day=1) + timedelta(days=32)).replace(day=1)
+    mes_completo = (primeiro_dia_mes_seguinte - timedelta(days=1)) == ultima_data
+
+    if mes_completo:
+        return ultima_data.year, ultima_data.month
+
+    mes_anterior = ultima_data.replace(day=1) - timedelta(days=1)
+    return mes_anterior.year, mes_anterior.month
+
+
+def _ultimo_ano_completo_com_dado(municipio=None):
+    """
+    Ano do último ANO CIVIL completo (jan-dez) com CHIRPS REALMENTE
+    publicado — mesma lógica de _ultimo_mes_completo_com_dado, um
+    nível acima. Substitui a antiga _ultimo_ano_completo (ano do
+    sistema menos 1), que tinha o mesmo bug latente: só não tinha
+    quebrado ainda porque a virada de ANO é 1x/ano, não 1x/mês —
+    mas quebraria do mesmo jeito se o CHIRPS atrasasse a publicação de
+    dezembro até depois de 1º de janeiro.
+    """
+    ultima_data = _ultima_data_chirps(municipio)
+    if ultima_data is None:
+        return None
+
+    if ultima_data.month == 12 and ultima_data.day == 31:
+        return ultima_data.year
+    return ultima_data.year - 1
 
 
 def _totais_do_mes_por_ano(municipio, mes):
@@ -184,7 +236,9 @@ def anomalia_mensal(municipio, ano=None, mes=None):
     """
     municipio = _resolver_municipio(municipio)
     if ano is None or mes is None:
-        ano, mes = _ultimo_mes_completo()
+        ano, mes = _ultimo_mes_completo_com_dado(municipio)
+        if ano is None:
+            return None
 
     chave = _cache_key("anomalia_mensal", municipio.codigo_ibge, ano, mes)
 
@@ -239,7 +293,9 @@ def percentil_historico_mensal(municipio, ano=None, mes=None):
     """
     municipio = _resolver_municipio(municipio)
     if ano is None or mes is None:
-        ano, mes = _ultimo_mes_completo()
+        ano, mes = _ultimo_mes_completo_com_dado(municipio)
+        if ano is None:
+            return None
 
     chave = _cache_key("percentil_historico_mensal", municipio.codigo_ibge, ano, mes)
 
@@ -391,10 +447,6 @@ def veranico(municipio):
     return _com_cache(chave, _calcular)
 
 
-def _ultimo_ano_completo():
-    return timezone.localdate().year - 1  # mesmo critério de totais_anuais
-
-
 def _valores_diarios_do_ano(municipio, ano):
     return list(
         ChirpsData.objects.filter(municipio=municipio, date__year=ano).values_list("value", flat=True)
@@ -410,7 +462,9 @@ def dias_chuvosos(municipio, ano=None):
     """
     municipio = _resolver_municipio(municipio)
     if ano is None:
-        ano = _ultimo_ano_completo()
+        ano = _ultimo_ano_completo_com_dado(municipio)
+        if ano is None:
+            return None
     chave = _cache_key("dias_chuvosos", municipio.codigo_ibge, ano)
 
     def _calcular():
@@ -439,7 +493,9 @@ def intensidade_chuva(municipio, ano=None):
     """
     municipio = _resolver_municipio(municipio)
     if ano is None:
-        ano = _ultimo_ano_completo()
+        ano = _ultimo_ano_completo_com_dado(municipio)
+        if ano is None:
+            return None
     chave = _cache_key("intensidade_chuva", municipio.codigo_ibge, ano)
 
     def _calcular():
@@ -766,3 +822,54 @@ def veranico_maximo_serie_anual(municipio):
         return {"serie": serie, "tendencia": tendencia}
 
     return _com_cache(chave, _calcular)
+
+
+# =======================================================================
+# Choropleth (mapa colorido por município) — único ponto do módulo que
+# olha os 142 municípios de MT DE UMA VEZ, em vez de "por município".
+# Justifica a exceção ao padrão do resto do arquivo: pintar um mapa
+# inteiro precisa do valor de todos ao mesmo tempo, e fazer 142
+# chamadas de acumulados_municipio (uma por município) seria 142
+# idas ao banco onde 1 resolve.
+# =======================================================================
+
+def acumulado_ultimo_mes_por_municipio_mt():
+    """
+    {"ano": int, "mes": int, "valores": {municipio_id: total_mm}} — o
+    total de chuva do último mês com dado REALMENTE publicado (ver
+    _ultimo_mes_completo_com_dado, fonte única de verdade reaproveitada
+    também por anomalia_mensal/percentil_historico_mensal) pros 142
+    municípios de MT DE UMA VEZ, numa query só. Município sem CHIRPS no
+    mês simplesmente não aparece em "valores" (fica de fora — quem
+    chama decide como tratar, ex.: cinza no mapa). Devolve ano/mes
+    junto pra quem consome não precisar descobrir de novo qual foi "o
+    último mês" usado.
+    """
+    ano, mes = _ultimo_mes_completo_com_dado(municipio=None)
+    if ano is None:
+        return {"ano": None, "mes": None, "valores": {}}
+
+    linhas = (
+        ChirpsData.objects.filter(municipio__uf="MT", date__year=ano, date__month=mes)
+        .values("municipio_id")
+        .annotate(total=Sum("value"))
+    )
+    return {"ano": ano, "mes": mes, "valores": {linha["municipio_id"]: linha["total"] for linha in linhas}}
+
+
+def quebras_quantis(valores, n=5):
+    """
+    Lista de (n-1) pontos de corte dividindo `valores` em `n` classes de
+    tamanho aproximadamente igual (quantis, não faixas fixas) — garante
+    contraste visual no choropleth mesmo que a distribuição real do mês
+    seja concentrada (ex.: mês seco, a maioria dos municípios com valor
+    baixo — faixas fixas deixariam quase tudo na mesma cor; quantil
+    sempre espalha pelas N cores). `statistics.quantiles`, mesma stdlib
+    já usada em climate/trends.py — nenhuma dependência nova.
+    """
+    valores_unicos = sorted(set(valores))
+    if len(valores_unicos) < n:
+        # Poucos valores distintos pra n classes — statistics.quantiles
+        # levantaria erro; devolve os próprios valores como cortes.
+        return valores_unicos
+    return statistics.quantiles(valores, n=n)

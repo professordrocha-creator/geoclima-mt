@@ -2,6 +2,7 @@
 import json
 
 from django.contrib.gis.geos import Point
+from django.core.cache import cache
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -11,6 +12,26 @@ from climate import municipio_indicators as mi
 from climate.models import ChirpsData
 from climate.municipio_exports import gerar_workbook_municipio
 from maps.models import Municipio
+
+MESES_NOME_PT = [
+    "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho",
+    "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+]
+
+# Paleta sequencial ColorBrewer "Blues" (5 classes) — clara=pouca chuva,
+# escura=muita chuva. Cor separada (cinza neutro) pra município sem dado
+# no mês, fora da escala, pra não confundir "pouca chuva" com "sem dado".
+PALETA_CHOROPLETH_CHUVA = ["#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"]
+COR_CHOROPLETH_SEM_DADO = "#e9ecef"
+
+# Só pra EXIBIÇÃO no choropleth — não altera maps.Municipio.geom (usado
+# no point-in-polygon do clique/toque no mapa, que precisa da precisão
+# original). Testado antes de escolher: 3,5MB brutos → 369KB nessa
+# tolerância, sem distorção visível no zoom estadual.
+TOLERANCIA_SIMPLIFICACAO_CHOROPLETH = 0.01
+
+CACHE_KEY_CHOROPLETH = "api_choropleth_chuva_mt"
+CACHE_TTL_CHOROPLETH_SEGUNDOS = 60 * 60 * 24  # 1 dia — CHIRPS só atualiza 1x/dia
 
 # Escalas de SPI expostas na home pública, com rótulo curto explicando o
 # horizonte de cada uma (pedido explícito do usuário — as 4 escalas juntas,
@@ -320,3 +341,80 @@ def municipio_exportar(request, municipio_id):
     resposta["Content-Disposition"] = f'attachment; filename="{nome_arquivo}"'
     workbook.save(resposta)
     return resposta
+
+
+def _classe_por_quantil(valor, quebras):
+    """Índice de 0 a len(quebras) conforme onde `valor` cai em relação
+    aos cortes — usado pra escolher a cor na PALETA_CHOROPLETH_CHUVA."""
+    indice = 0
+    for corte in quebras:
+        if valor > corte:
+            indice += 1
+        else:
+            break
+    return indice
+
+
+def municipio_choropleth_chuva(request):
+    """
+    GET /api/municipios/choropleth-chuva/ — GeoJSON FeatureCollection dos
+    142 municípios de MT pra pintar o mapa choropleth da home pública.
+    Cada Feature já vem com a cor resolvida (classe de quantil da
+    distribuição REAL do mês, não faixa fixa — garante contraste mesmo
+    em mês seco, onde a maioria dos municípios teria valor baixo e uma
+    faixa fixa deixaria quase tudo na mesma cor). Reaproveita
+    climate.municipio_indicators pra tudo — nenhum cálculo aqui além de
+    montar o GeoJSON e escolher a cor.
+
+    Cacheado 24h — geometria simplificada + agregação + classes de cor,
+    tudo junto no mesmo cache, pra não repetir 142 simplify()/consultas
+    a cada visita (o dado só muda 1x/dia de qualquer forma).
+    """
+    cacheado = cache.get(CACHE_KEY_CHOROPLETH)
+    if cacheado is not None:
+        return JsonResponse(cacheado)
+
+    dados = mi.acumulado_ultimo_mes_por_municipio_mt()
+    valores_por_municipio = dados["valores"]
+    quebras = mi.quebras_quantis(list(valores_por_municipio.values()), n=len(PALETA_CHOROPLETH_CHUVA))
+
+    features = []
+    for municipio in Municipio.objects.filter(uf="MT"):
+        geometria_simplificada = municipio.geom.simplify(TOLERANCIA_SIMPLIFICACAO_CHOROPLETH, preserve_topology=True)
+        valor = valores_por_municipio.get(municipio.id)
+
+        if valor is None:
+            cor = COR_CHOROPLETH_SEM_DADO
+        else:
+            cor = PALETA_CHOROPLETH_CHUVA[_classe_por_quantil(valor, quebras)]
+
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(geometria_simplificada.geojson),
+            "properties": {
+                "id": municipio.id,
+                "nome": municipio.nome,
+                "uf": municipio.uf,
+                "codigo_ibge": municipio.codigo_ibge,
+                "acumulado_mm": round(valor, 1) if valor is not None else None,
+                "cor": cor,
+            },
+        })
+
+    resultado = {
+        "type": "FeatureCollection",
+        "periodo": {
+            "ano": dados["ano"],
+            "mes": dados["mes"],
+            "mes_nome": MESES_NOME_PT[dados["mes"]],
+        },
+        "legenda": {
+            "paleta": PALETA_CHOROPLETH_CHUVA,
+            "cor_sem_dado": COR_CHOROPLETH_SEM_DADO,
+            "quebras_mm": [round(q, 1) for q in quebras],
+        },
+        "features": features,
+    }
+
+    cache.set(CACHE_KEY_CHOROPLETH, resultado, CACHE_TTL_CHOROPLETH_SEGUNDOS)
+    return JsonResponse(resultado)

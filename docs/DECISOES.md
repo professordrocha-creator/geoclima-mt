@@ -1611,3 +1611,70 @@ um dia de chuva era incorretamente tratado como continuação. Só
 apareceu ao testar contra dado real (`inicio` sempre `None`, `fim`
 sempre certo) — corrigido e revalidado com 2 casos controlados antes
 de re-testar contra os municípios reais.
+
+## 2026-09-01 — Choropleth municipal em vez de tiles GEE pro mapa de precipitação (Windy removido)
+
+**Decisão:** o mapa que substitui o iframe do Windy no fim da home
+pinta os 142 municípios de MT por uma cor conforme a chuva do mês
+(choropleth), em vez de tiles pixel-a-pixel do Google Earth Engine
+(`ee.Image.getMapId()`). Decisão do usuário, com base numa
+investigação prévia (turno anterior a este, sem código) que **testou
+de verdade** — não só leu documentação — a viabilidade técnica do
+`getMapId()` com a service account já usada pelo resto do projeto.
+
+**O que a investigação confirmou (fatos, não suposição):**
+- `getMapId()` funciona com service account: 0,46s, devolveu
+  `tile_fetcher.url_format` no formato v1
+  (`.../v1/projects/climatga/maps/<hash>/tiles/{z}/{x}/{y}`).
+- Testei o receio específico levantado antes de codar — será que a
+  API v1 exige header `Authorization: Bearer` em cada tile,
+  inviabilizando um `L.tileLayer()` puro do Leaflet? **Não**: um GET
+  sem nenhum header, no mapid real gerado, devolveu HTTP 200 com PNG
+  válido; um mapid adulterado devolveu 401 "Invalid token" — ou seja,
+  o hash longo dentro da própria URL FUNCIONA como o token (a API v1
+  assina a credencial dentro do path, não como parâmetro/header
+  separado). Um `<img>`/tile do navegador funcionaria direto, sem
+  proxy.
+
+**Por que NÃO foi essa a escolha, mesmo funcionando tecnicamente:**
+o risco não é autenticação — é quota. Os tiles PNG de cada
+`{z}/{x}/{y}` são servidos direto pelo GEE, sem passar pelo Django;
+expor isso a tráfego público anônimo sem login compartilharia a
+mesma quota do projeto GCP `climatga` que hoje sustenta o
+`atualizar_chirps` diário (Etapa 3.3, produção, roda sozinho há
+semanas). Seria a primeira vez que o GEE ficaria exposto a tráfego
+público sem controle do Django no meio — hoje só é acessado
+internamente (Celery, agendado). Motivos adicionais a favor do
+choropleth: consistência metodológica (todo indicador do projeto —
+SPI, climatologia, tendência — já é por município; o mapa "bate" com
+o resto da ferramenta) e confiabilidade pra demonstração na banca
+(sempre funciona, é dado do banco, não depende do GEE estar no ar
+durante a apresentação).
+
+**Trade-off honesto, registrado**: o choropleth é visualmente "blocos
+por município" (~1 valor por polígono inteiro), não a mancha suave
+pixel-a-pixel (~5km) que o pixel real do CHIRPS daria. É a troca
+deliberada de "mais bonito, mas com uma dependência de runtime e
+risco de quota compartilhada" por "mais simples e confiável, mesma
+resolução de todo o resto do projeto".
+
+**Pixel real GEE fica registrado como evolução FUTURA, não descartada**
+— tecnicamente já validado nesta mesma investigação (funciona, sem
+o obstáculo de autenticação que se temia). Se um dia fizer sentido
+implementar: usar um projeto GCP separado (ou quota isolada) só pra
+tile-serving público, desacoplado do projeto que roda a importação
+diária de produção — resolve o risco de quota compartilhada sem
+abrir mão do pixel real.
+
+**Peso de geometria e bug de calendário vs. dado real** (detalhe
+técnico completo em HISTORICO.md): a simplificação de exibição
+(0,01°/~1,1km, 3,5MB → 369KB, sem tocar `Municipio.geom` original) e
+um bug real pego durante a implementação — o cálculo de "último mês
+completo" usava o relógio do sistema (`hoje - 1 mês`), e o sistema já
+tinha virado setembro antes do CHIRPS publicar agosto inteiro,
+fazendo os 142 municípios aparecerem "sem dado" de uma vez.
+Corrigido derivando o mês a partir do dado real (`MAX(date)` no
+banco), não do calendário — o mesmo problema de fundo ainda afeta
+`anomalia_mensal`/`percentil_historico_mensal` (FASE 1), registrado
+em HISTORICO.md como pendência a confirmar com o usuário antes de
+corrigir (muda comportamento de indicadores já em produção).

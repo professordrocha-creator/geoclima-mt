@@ -3,6 +3,158 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-09-06 — Correção definitiva: "último período com dado real" vira fonte única de verdade (fecha o bug da anomalia/percentil + risco latente de dias_chuvosos/intensidade)
+
+**Contexto:** a entrada anterior deixou pendente um bug confirmado
+(`anomalia_mensal`/`percentil_historico_mensal` devolvendo `None` pra
+todo município desde que o relógio do sistema virou setembro sem o
+CHIRPS ter publicado agosto) e uma varredura completa por 4 categorias
+de risco. Usuário pediu diagnóstico primeiro (sem mexer em nada), depois
+confirmou: corrigir Categoria A (bug confirmado) **e** Categoria B
+(`dias_chuvosos`/`intensidade_chuva` — mesmo bug latente, só não tinha
+quebrado ainda porque a virada de ANO é 1x/ano) com **um único
+helper**, não três implementações separadas do mesmo conceito.
+
+**Diagnóstico confirmado antes de corrigir** (rodado de novo, sistema
+já em 06/09 — a defasagem aumentou, CHIRPS ainda só até 31/07):
+`anomalia_mensal`/`percentil_historico_mensal` de Tangará e Cáceres
+continuavam `None`. Legenda do choropleth confirmada dinâmica de
+verdade (testei com valores sintéticos de "mês chuvoso" — quebras
+saíram completamente diferentes das de julho, prova de que não há
+nada chumbado).
+
+**Refactor** (`climate/municipio_indicators.py`): duas funções velhas
+removidas — `_ultimo_mes_completo()` (calendário de hoje − 1 mês) e
+`_ultimo_ano_completo()` (ano de hoje − 1) — e a versão específica do
+choropleth (`_ultimo_mes_completo_com_dado_mt`, só MT) também retirada.
+No lugar, **uma família só**, todas em cima de um único primitivo:
+- `_ultima_data_chirps(municipio=None)` — `MAX(date)` real no banco;
+  `municipio=None` consulta os 142 de MT juntos (choropleth),
+  passando um município consulta só a série dele (indicadores).
+- `_ultimo_mes_completo_com_dado(municipio=None)` — deriva (ano, mês)
+  do dado real, não do relógio.
+- `_ultimo_ano_completo_com_dado(municipio=None)` — mesma lógica, um
+  nível acima (ano civil completo).
+
+Usada agora por: `anomalia_mensal`, `percentil_historico_mensal`
+(Categoria A — corrige o bug), `dias_chuvosos`, `intensidade_chuva`
+(Categoria B — fecha o risco antes de morder), e
+`acumulado_ultimo_mes_por_municipio_mt` (choropleth, que já usava a
+ideia certa, só duplicada — agora reaproveita a mesma função).
+
+**Categorias C e D não tocadas** (confirmado corretas na varredura
+anterior — degradam graciosamente, não fingem que um período errado é
+"o atual"): `acumulados_municipio`, `veranico`, `totais_anuais`,
+`totais_mensais`, `cenarios_futuros`, `_registros_diarios_todos_anos`.
+
+**Pendência registrada, fora do escopo desta correção** (confirmado
+com o usuário): `dashboard/services.py` (painel privado — `acumulados`,
+`serie_chuva`, `serie_spi`) tem o mesmo padrão "janela relativa a hoje"
+da Categoria C, mas não foi auditado nem tocado — fica pra quando o
+painel privado for mexido de novo.
+
+**Antes/depois testado (o mesmo teste que confirmou o bug):**
+
+| | Antes (sistema 06/09, calendário) | Depois (dado real) |
+|---|---|---|
+| Tangará — anomalia_mensal | `None` | `{ano:2026, mes:7, anomalia_percentual:101.1, ...}` |
+| Tangará — percentil_historico | `None` | `{ano:2026, mes:7, percentil:68.9, posicao_mais_seco:32, ...}` |
+| Cáceres — anomalia_mensal | `None` | `{ano:2026, mes:7, anomalia_percentual:70.5, ...}` |
+| Cáceres — percentil_historico | `None` | `{ano:2026, mes:7, percentil:60.0, ...}` |
+
+Valores pós-correção **idênticos** aos já validados na entrada da
+FASE 1 original (antes de qualquer defasagem de relógio) — confirma
+que a correção não mudou o cálculo, só a data usada como alvo.
+`dias_chuvosos`/`intensidade_chuva` de Cáceres testados
+**inalterados** (`{1:169, 5:90, 10:34}` dias, 6,67 mm/dia chuvoso, ano
+2025 — igual ao já registrado) — imunizados contra a virada de ano
+sem mudar o resultado atual. Choropleth revalidado ponta a ponta via
+HTTP real (`/api/municipios/choropleth-chuva/`): julho/2026, 142/142
+municípios. `manage.py check` limpo.
+
+## 2026-09-01 (continuação 5) — Mapa choropleth de precipitação substitui o iframe do Windy
+
+**Contexto:** investigação prévia (turno anterior, sem código) testou
+`ee.Image.getMapId()` com a service account de verdade — funciona
+(tile público, sem header de auth, mapid funciona como o próprio
+token embutido na URL), mas exporia o GEE direto a tráfego público
+sem controle, compartilhando quota com a importação diária de
+produção. Decisão do usuário: **choropleth municipal** em vez de
+tiles GEE — zero risco de quota, consistência metodológica (todo
+indicador do projeto já é por município), confiável pra demonstração
+na banca. Pixel GEE registrado como evolução futura em
+docs/DECISOES.md, não descartado.
+
+**Peso da geometria testado antes de decidir a tolerância**: os 142
+polígonos de MT somam 3,5MB brutos (25KB/município em média, até
+105KB em Paranatinga) — pesado pra uma home pública. Testei
+`geom.simplify()` em 4 tolerâncias antes de escolher: 0,01° (~1,1km)
+reduz pra 369KB sem distorção visível em zoom estadual — só pra
+EXIBIÇÃO do choropleth, não altera `maps.Municipio.geom` (usado no
+point-in-polygon do clique no mapa principal, que precisa da
+precisão original).
+
+**Bug real pego durante a implementação** (não hipotético — aconteceu
+de verdade nesta sessão): o sistema virou setembro (relógio em
+01/09/2026) antes do CHIRPS publicar agosto inteiro (ainda só até
+31/07). A primeira versão da agregação usava
+`_ultimo_mes_completo()` (calendário de HOJE menos 1 mês, já usada
+por `anomalia_mensal`/`percentil_historico_mensal`) — resultado: os
+142 municípios do choropleth vieram todos "sem dado" de uma vez,
+porque "agosto" (mês do calendário) não tem nenhum CHIRPS ainda.
+Corrigido com uma função nova, `_ultimo_mes_completo_com_dado_mt()`
+(`climate/municipio_indicators.py`), que olha a **data mais recente
+de fato no banco** em vez do relógio do sistema — deriva o mês a
+partir de `MAX(date)`, não de `hoje - 1 mês`. Revalidado: voltou a
+resolver julho/2026 corretamente, 142/142 municípios com valor.
+
+**Achado importante, registrado mas NÃO corrigido nesta entrada** (fora
+do escopo do que foi pedido — só o choropleth): esse mesmo problema
+de fundo afeta `anomalia_mensal`/`percentil_historico_mensal`
+(FASE 1, usadas na home E na exportação Excel) desde a virada do mês
+— hoje (01/09) essas duas funções também devolvem `None` pra todo
+município, porque "o último mês do calendário" (agosto) ainda não
+tem CHIRPS. Não é um bug novo desta sessão, é uma característica do
+projeto (calendário vs. publicação real do CHIRPS) que só passou a
+morder porque o tempo real avançou durante o desenvolvimento. Vale
+uma correção futura reaproveitando `_ultimo_mes_completo_com_dado_mt`
+(ou promovendo-a a critério único do módulo) — decisão que fica pro
+usuário confirmar antes, já que muda o comportamento de indicadores
+já em produção.
+
+**Backend**: `climate/municipio_indicators.py` ganhou
+`acumulado_ultimo_mes_por_municipio_mt()` (1 query agregando os 142
+municípios de uma vez — o único ponto do módulo que olha todos ao
+mesmo tempo, todo o resto é por-município de propósito) e
+`quebras_quantis()` (`statistics.quantiles`, mesma stdlib já usada em
+`climate/trends.py`). Endpoint novo `GET /api/municipios/choropleth-chuva/`
+(`api/views.py`/`api/urls.py`) monta o `FeatureCollection` com geometria
+simplificada + cor já resolvida por classe de quantil (não faixa fixa
+— importante pra ter contraste mesmo em mês seco, ver teste abaixo),
+cacheado 24h.
+
+**Frontend**: removido o bloco inteiro do Windy (`core/templates/core/index.html`)
+— iframe, título "Monitoramento Meteorológico em Tempo Real", tudo.
+No lugar, `initChoroplethMap()`: mapa Leaflet novo e independente do
+mapa principal (`choroplethMapInstance`, não reaproveita `map`),
+`L.geoJSON` colorido pela `cor` já vinda do backend, tooltip
+hover/toque com nome+mm, legenda customizada (`L.control`, técnica
+padrão Leaflet, sem lib nova) com as faixas de quantil reais. Clique
+num município → `handleChoroplethClick` → sincroniza o dropdown
+(`populateMunicipios`) e chama **`aplicarSelecaoMunicipio`** — a
+MESMA função usada pelo dropdown e pelo clique no mapa principal
+(Etapa anterior), nenhuma lógica de carregamento duplicada.
+
+**Testado**: endpoint real — período resolvido corretamente
+(julho/2026), 0 municípios sem dado, **distribuição quase perfeitamente
+igual entre as 5 classes de cor (28/29/29/28/28)** mesmo com valores
+absolutos baixos e próximos (min 0,1mm, max 21,8mm, mediana 6mm — mês
+seco) — confirma que quebra por quantil evita o mapa "todo de uma cor
+só" que uma faixa fixa daria nesse cenário. Payload real: 369KB,
+resposta em 0,6s (sem cache "frio"). `manage.py check` limpo, JS
+revalidado com `node --check`, `windy.com` confirmado ausente do HTML
+renderizado (`grep -c` = 0).
+
 ## 2026-09-01 (continuação 4) — Clique no mapa da home seleciona município (point-in-polygon PostGIS)
 
 **Contexto:** pedido do usuário — clicar em qualquer ponto do mapa

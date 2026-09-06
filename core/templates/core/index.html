@@ -27,6 +27,12 @@
         /* Indica que o mapa é clicável (ver handleMapClick) — especificidade
            de ID vence o cursor "grab" que o Leaflet aplica por classe. */
         #map { cursor: pointer; }
+        #choroplethMap { cursor: pointer; }
+
+        /* Legenda do choropleth de precipitação — controle Leaflet customizado */
+        .choropleth-legenda { background: #ffffff; padding: 0.6rem 0.9rem; border-radius: 0.6rem; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-size: 0.8rem; line-height: 1.7; color: #343a40; }
+        .choropleth-legenda strong { display: block; margin-bottom: 0.2rem; }
+        .legenda-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 6px; vertical-align: middle; border: 1px solid rgba(0,0,0,0.1); }
 
         /* SELETOR DE LOCALIDADE (Estado/Cidade) */
         .locality-selector-card { background-color: #ffffff; border-radius: 1rem; padding: 1.25rem 1.5rem; margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
@@ -302,17 +308,17 @@
             </div>
         </div>
 
-        <!-- NOVO BLOCO: RADAR METEOROLÓGICO -->
+        <!-- BLOCO: MAPA DE PRECIPITAÇÃO POR MUNICÍPIO (choropleth CHIRPS) —
+             substitui o antigo iframe do Windy. -->
         <div class="row mt-4 mb-4">
             <div class="col-12">
                 <div class="card p-3 shadow-sm" style="border-radius: 1rem; background-color: #ffffff;">
-                    <h5 class="fw-bold mb-3" style="color: #1a1a1a;">📡 Monitoramento Meteorológico em Tempo Real (Satélite e Radar)</h5>
-                    <div class="radar-container" style="position: relative; width: 100%; height: 450px; border-radius: 0.8rem; overflow: hidden;">
-                         <iframe 
-    src="https://embed.windy.com/embed2.html?lat=-13.200&lon=-56.500&zoom=6&level=surface&overlay=radar&product=radar&menu=true&message=true&marker=true&calendar=now&pressure=true&type=map&location=coordinates&detail=true&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
-    style="width: 100%; height: 100%; border: none;" 
-    allowfullscreen>
-</iframe>
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                        <h5 class="fw-bold mb-0" style="color: #1a1a1a;" id="choroplethTitulo">🗺️ Precipitação por Município — CHIRPS</h5>
+                        <small class="text-muted">Dados: CHIRPS | Base cartográfica: OpenStreetMap</small>
+                    </div>
+                    <div style="position: relative; width: 100%; height: 500px; border-radius: 0.8rem; overflow: hidden;">
+                        <div id="choroplethMap" style="width: 100%; height: 100%;"></div>
                     </div>
                 </div>
             </div>
@@ -593,6 +599,94 @@
                     mapElement.innerHTML = `<div class="alert alert-danger">Erro ao carregar o mapa: ${error.message}</div>`;
                 }
             }
+        }
+
+        // ==================== MAPA CHOROPLETH DE PRECIPITAÇÃO ====================
+        let choroplethMapInstance = null;
+        let choroplethLayer = null;
+
+        async function initChoroplethMap() {
+            const elemento = document.getElementById("choroplethMap");
+            if (!elemento) return;
+
+            try {
+                choroplethMapInstance = L.map("choroplethMap").setView([-12.6, -55.9], 5);
+                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                    attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+                    maxZoom: 19,
+                }).addTo(choroplethMapInstance);
+
+                const response = await fetch("/api/municipios/choropleth-chuva/");
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const dados = await response.json();
+
+                const titulo = document.getElementById("choroplethTitulo");
+                if (titulo && dados.periodo.mes_nome) {
+                    titulo.textContent = `🗺️ Precipitação por Município — CHIRPS, ${dados.periodo.mes_nome}/${dados.periodo.ano}`;
+                }
+
+                choroplethLayer = L.geoJSON(dados, {
+                    style: (feature) => ({
+                        fillColor: feature.properties.cor,
+                        color: "#495057",
+                        weight: 0.7,
+                        fillOpacity: 0.85,
+                    }),
+                    onEachFeature: (feature, layer) => {
+                        const valorTexto = feature.properties.acumulado_mm !== null
+                            ? `${feature.properties.acumulado_mm} mm`
+                            : "sem dado";
+                        layer.bindTooltip(`<strong>${feature.properties.nome}</strong><br>${valorTexto}`, { sticky: true });
+
+                        layer.on({
+                            mouseover: () => layer.setStyle({ weight: 2.5, color: "#1a1a1a" }),
+                            mouseout: () => choroplethLayer.resetStyle(layer),
+                            click: () => handleChoroplethClick(feature.properties),
+                        });
+                    },
+                }).addTo(choroplethMapInstance);
+
+                choroplethMapInstance.fitBounds(choroplethLayer.getBounds());
+
+                renderizarLegendaChoropleth(dados.legenda);
+            } catch (error) {
+                console.error("Erro ao carregar o mapa de precipitação por município:", error);
+                elemento.innerHTML = `<div class="alert alert-danger m-2">Não foi possível carregar o mapa de precipitação agora.</div>`;
+            }
+        }
+
+        function renderizarLegendaChoropleth(legenda) {
+            const controle = L.control({ position: "bottomright" });
+            controle.onAdd = function () {
+                const div = L.DomUtil.create("div", "choropleth-legenda");
+                const { paleta, quebras_mm, cor_sem_dado } = legenda;
+
+                let html = "<strong>Chuva (mm)</strong>";
+                for (let i = 0; i < paleta.length; i++) {
+                    const de = i === 0 ? null : quebras_mm[i - 1];
+                    const ate = i === paleta.length - 1 ? null : quebras_mm[i];
+                    let rotulo;
+                    if (de === null) rotulo = `até ${ate} mm`;
+                    else if (ate === null) rotulo = `acima de ${de} mm`;
+                    else rotulo = `${de} – ${ate} mm`;
+                    html += `<div><span class="legenda-swatch" style="background:${paleta[i]}"></span>${rotulo}</div>`;
+                }
+                html += `<div><span class="legenda-swatch" style="background:${cor_sem_dado}"></span>Sem dado</div>`;
+
+                div.innerHTML = html;
+                return div;
+            };
+            controle.addTo(choroplethMapInstance);
+        }
+
+        // Clique num município do choropleth = MESMO caminho do clique no mapa
+        // principal e do dropdown: sincroniza o <select> e reaproveita
+        // aplicarSelecaoMunicipio — nenhuma lógica nova de carregamento aqui.
+        async function handleChoroplethClick(properties) {
+            const estadoSelect = document.getElementById("estadoSelect");
+            if (estadoSelect) estadoSelect.value = properties.uf;
+            await populateMunicipios(properties.uf, properties.codigo_ibge);
+            aplicarSelecaoMunicipio(properties.id);
         }
 
         function setupGeolocationAndWeather() {
@@ -1817,6 +1911,7 @@
 
         document.addEventListener("DOMContentLoaded", function() {
             initializeMap();
+            initChoroplethMap();
             // Comportamento inicial: geolocalização do usuário (como já era).
             // Os dropdowns só assumem o controle do mapa/clima quando o
             // usuário escolhe uma cidade manualmente (evento "change").
