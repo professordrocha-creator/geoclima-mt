@@ -138,6 +138,14 @@
         .explicacao-painel .explicacao-rotulo { font-weight: 600; color: #343a40; }
         .explicacao-painel > div + div { margin-top: 0.35rem; }
 
+        /* Ícone "?" de explicação rápida em cards de número — tooltip do
+           Bootstrap (hover no desktop, toque no celular via foco real de
+           <button>), diferente do botão ℹ️ dos gráficos acima (que abre um
+           painel maior com conceito + interpretação dos dados). Aqui é só
+           uma frase fixa curta, direto no card. */
+        .tooltip-info-btn { display: inline-flex; align-items: center; justify-content: center; width: 1.05rem; height: 1.05rem; border-radius: 50%; border: 1px solid #adb5bd; background-color: #f8f9fa; color: #6c757d; font-size: 0.68rem; font-weight: 700; line-height: 1; padding: 0; cursor: help; vertical-align: middle; margin-left: 0.3rem; }
+        .tooltip-info-btn:hover, .tooltip-info-btn:focus { background-color: #e9ecef; color: #343a40; }
+
     </style>
 </head>
 <body>
@@ -913,6 +921,50 @@
             assinatura: "Compara quantos dias choveu (barras) com a força média de cada chuva (linha) no mesmo gráfico — mostra se a chuva está mudando de padrão, por exemplo chovendo em menos dias mas com mais força em cada evento.",
         };
 
+        // ==================== ÍCONE "?" DE EXPLICAÇÃO RÁPIDA (cards de número) ====================
+        // Mesmo espírito do CONCEITOS_GRAFICOS acima (frase fixa, sem previsão
+        // nem prescrição), mas pra cards compactos de número — um tooltip do
+        // Bootstrap num botão real, não um painel expansível (que não cabe
+        // num card pequeno). Pedido do usuário: "um produtor rural ou alguém
+        // de outra área precisa entender" cada número sozinho.
+        const EXPLICACOES_TOOLTIP = {
+            spi: "Índice de Precipitação Padronizada: compara a chuva de um período com o histórico da mesma região. Negativo indica período mais seco que o normal; positivo, mais chuvoso; perto de zero, dentro do padrão. As 4 escalas (1/3/6/12 meses) olham janelas de tempo diferentes — as mais curtas reagem mais rápido a mudanças na chuva.",
+            anomalia: "Compara a chuva do mês com a média histórica do MESMO mês em outros anos. A diferença absoluta (mm) e percentual (%) têm o mesmo peso aqui de propósito: num mês normalmente seco, um percentual grande pode representar poucos mm.",
+            percentil: "Posição do mês atual dentro do histórico da mesma época do ano — por exemplo, \"percentil 20\" quer dizer que 80% dos anos anteriores tiveram esse mês mais chuvoso que o atual. Quanto mais baixo, mais seco em relação ao normal; mais alto, mais chuvoso.",
+            acumulados: "Soma da chuva registrada nos últimos 7, 30 e 90 dias — visão rápida do quanto choveu recentemente, sem comparar com o histórico (pra isso, veja a anomalia e o percentil).",
+            veranico: "Maior sequência de dias seguidos sem chuva significativa (abaixo de 1mm) — nos últimos 12 meses e o recorde de todo o histórico. Quanto maior o número, mais prolongado foi o período seco.",
+            diasChuvosos: "Quantos dias do ano tiveram chuva acima de cada limiar (1, 5 ou 10mm). Mostra se a chuva do ano está concentrada em poucos dias fortes ou espalhada em mais dias fracos.",
+            intensidade: "Média de chuva (mm) só nos dias em que efetivamente choveu naquele ano — indica se a chuva costuma ser fraca ou forte quando ocorre, sem os dias secos puxando a média pra baixo.",
+            recordes: "Os anos (ou meses) com maior e menor total de chuva desde o início da série histórica (1981) — referência dos extremos já observados na região.",
+            tendencia: "Mudança na chuva anual ao longo dos anos (teste Mann-Kendall + inclinação de Sen) — mm/ano positivo indica aumento, negativo indica redução. O valor de p indica se essa tendência é estatisticamente confiável ou pode ser só variação natural (geralmente, p menor que 0,05 é considerado significativo).",
+        };
+
+        function escapeAtributoHtml(texto) {
+            return texto.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        function iconeTooltip(chave) {
+            const texto = EXPLICACOES_TOOLTIP[chave];
+            if (!texto) return "";
+            return `<button type="button" class="tooltip-info-btn" data-bs-toggle="tooltip" title="${escapeAtributoHtml(texto)}">?</button>`;
+        }
+
+        // Inicializa (ou reaproveita) o tooltip do Bootstrap em todo botão
+        // "?" dentro de `raiz` — chamado depois de cada innerHTML que injeta
+        // novos ícones (o conteúdo é recriado do zero a cada município
+        // escolhido, então os botões são sempre novos elementos DOM).
+        // trigger "hover focus" (não só "hover"): um <button> real recebe
+        // foco tanto no clique do mouse quanto no TOQUE — é o que faz o
+        // tooltip funcionar no celular, que não tem "passar o mouse" de
+        // verdade.
+        function inicializarTooltips(raiz) {
+            (raiz || document).querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+                if (!bootstrap.Tooltip.getInstance(el)) {
+                    new bootstrap.Tooltip(el, { trigger: "hover focus", placement: "top" });
+                }
+            });
+        }
+
         function htmlBlocoExplicacao(idBase) {
             return `
                 <div class="text-end">
@@ -1001,6 +1053,10 @@
             configurarBotaoExportar(dados.municipio.id);
 
             container.innerHTML = `
+                <div class="d-flex align-items-center gap-1 mb-2">
+                    <h6 class="section-title mb-0">Índice de Seca/Chuva (SPI)</h6>
+                    ${iconeTooltip("spi")}
+                </div>
                 <div class="spi-cards-grid mb-2" id="spiCardsGrid"></div>
                 <div class="spi-evolucao-toggle-wrap mb-3">
                     <button type="button" class="btn btn-sm btn-outline-primary" id="toggleSpiEvolucaoBtn">
@@ -1049,6 +1105,10 @@
                         <canvas id="climatologiaChart"></canvas>
                     </div>
                 </div>
+                <div class="d-flex align-items-center gap-1 mb-2 mt-2">
+                    <h6 class="section-title mb-0">Chuva Acumulada Recente</h6>
+                    ${iconeTooltip("acumulados")}
+                </div>
                 <div class="acumulados-grid" id="acumuladosGrid"></div>
             `;
 
@@ -1090,7 +1150,7 @@
                     ? `<div class="chirps-nota-discreta">Valores baixos típicos do período seco — variação percentual pouco representativa.</div>`
                     : "";
                 anomaliaCard.innerHTML = `
-                    <div class="chirps-info-title">Anomalia de Chuva — ${MESES_ABREV[a.mes - 1]}/${a.ano}</div>
+                    <div class="chirps-info-title">Anomalia de Chuva — ${MESES_ABREV[a.mes - 1]}/${a.ano} ${iconeTooltip("anomalia")}</div>
                     <div class="anomalia-dupla">
                         <div class="anomalia-item">
                             <div class="anomalia-item-valor">${sinalAbs}${a.anomalia_absoluta_mm.toFixed(1)} mm</div>
@@ -1106,7 +1166,7 @@
                 `;
             } else {
                 anomaliaCard.innerHTML = `
-                    <div class="chirps-info-title">Anomalia de Chuva</div>
+                    <div class="chirps-info-title">Anomalia de Chuva ${iconeTooltip("anomalia")}</div>
                     <div class="chirps-info-valor">—</div>
                     <div class="chirps-info-detalhe">Histórico insuficiente ainda.</div>
                 `;
@@ -1116,11 +1176,11 @@
             const percentilCard = document.getElementById("percentilCard");
             const p = dados.percentil_historico;
             percentilCard.innerHTML = p ? `
-                <div class="chirps-info-title">Percentil Histórico — ${MESES_ABREV[p.mes - 1]}/${p.ano}</div>
+                <div class="chirps-info-title">Percentil Histórico — ${MESES_ABREV[p.mes - 1]}/${p.ano} ${iconeTooltip("percentil")}</div>
                 <div class="chirps-info-valor">Percentil ${p.percentil.toFixed(0)}</div>
                 <div class="chirps-info-detalhe">${p.posicao_mais_seco}º ${MESES_ABREV[p.mes - 1]} mais seco desde ${p.primeiro_ano_historico} (de ${p.n_anos_historico} anos)</div>
             ` : `
-                <div class="chirps-info-title">Percentil Histórico</div>
+                <div class="chirps-info-title">Percentil Histórico ${iconeTooltip("percentil")}</div>
                 <div class="chirps-info-valor">—</div>
                 <div class="chirps-info-detalhe">Histórico insuficiente ainda.</div>
             `;
@@ -1139,6 +1199,8 @@
                     <div class="acumulado-valor">${item.chirps_mm !== null ? item.chirps_mm.toFixed(1) + " mm" : "aguardando dado"}</div>
                 </div>
             `).join("");
+
+            inicializarTooltips(container);
         }
 
         // Busca os totais mensais do ano escolhido (dropdown) e sobrepõe
@@ -1620,13 +1682,14 @@
             // linguagem agronômica prescritiva) ---
             const veranicoGrid = document.getElementById("veranicoCardsGrid");
             const formatarCardVeranico = (sub, titulo) => {
+                const tituloComIcone = `${titulo} ${iconeTooltip("veranico")}`;
                 if (!sub) {
-                    return `<div class="fase2-card"><div class="fase2-card-titulo">${titulo}</div><div class="fase2-card-valor">—</div></div>`;
+                    return `<div class="fase2-card"><div class="fase2-card-titulo">${tituloComIcone}</div><div class="fase2-card-valor">—</div></div>`;
                 }
                 const periodo = sub.inicio ? `${formatarDataCurta(sub.inicio)} a ${formatarDataCurta(sub.fim)}` : `até ${formatarDataCurta(sub.fim)}`;
                 return `
                     <div class="fase2-card">
-                        <div class="fase2-card-titulo">${titulo}</div>
+                        <div class="fase2-card-titulo">${tituloComIcone}</div>
                         <div class="fase2-card-valor">${sub.dias} dias</div>
                         <div class="fase2-card-detalhe">${periodo}</div>
                     </div>
@@ -1635,37 +1698,37 @@
             veranicoGrid.innerHTML = dados.veranico
                 ? formatarCardVeranico(dados.veranico.recente_12_meses, "Dias secos consecutivos — últimos 12 meses")
                   + formatarCardVeranico(dados.veranico.recorde_historico, "Dias secos consecutivos — recorde histórico")
-                : `<div class="fase2-card"><div class="fase2-card-titulo">Dias secos consecutivos</div><div class="fase2-card-valor">—</div></div>`;
+                : `<div class="fase2-card"><div class="fase2-card-titulo">Dias secos consecutivos ${iconeTooltip("veranico")}</div><div class="fase2-card-valor">—</div></div>`;
 
             // --- Dias chuvosos ---
             const dc = dados.dias_chuvosos;
             document.getElementById("diasChuvososCard").innerHTML = dc ? `
-                <div class="chirps-info-title">Dias Chuvosos — ${dc.ano}</div>
+                <div class="chirps-info-title">Dias Chuvosos — ${dc.ano} ${iconeTooltip("diasChuvosos")}</div>
                 <div class="chirps-info-valor">${dc.limiares["1"]} dias</div>
                 <div class="chirps-info-detalhe">acima de 1mm (${dc.limiares["5"]} acima de 5mm, ${dc.limiares["10"]} acima de 10mm)</div>
-            ` : `<div class="chirps-info-title">Dias Chuvosos</div><div class="chirps-info-valor">—</div>`;
+            ` : `<div class="chirps-info-title">Dias Chuvosos ${iconeTooltip("diasChuvosos")}</div><div class="chirps-info-valor">—</div>`;
 
             // --- Intensidade da chuva ---
             const ic = dados.intensidade_chuva;
             document.getElementById("intensidadeCard").innerHTML = ic ? `
-                <div class="chirps-info-title">Intensidade da Chuva — ${ic.ano}</div>
+                <div class="chirps-info-title">Intensidade da Chuva — ${ic.ano} ${iconeTooltip("intensidade")}</div>
                 <div class="chirps-info-valor">${ic.intensidade_mm_por_dia_chuvoso !== null ? ic.intensidade_mm_por_dia_chuvoso.toFixed(1) + " mm/dia" : "—"}</div>
                 <div class="chirps-info-detalhe">${ic.total_mm.toFixed(0)} mm em ${ic.dias_com_chuva} dias com chuva</div>
-            ` : `<div class="chirps-info-title">Intensidade da Chuva</div><div class="chirps-info-valor">—</div>`;
+            ` : `<div class="chirps-info-title">Intensidade da Chuva ${iconeTooltip("intensidade")}</div><div class="chirps-info-valor">—</div>`;
 
             // --- Recordes ---
             const r = dados.recordes;
             document.getElementById("recordeAnoCard").innerHTML = r ? `
-                <div class="chirps-info-title">Recordes Anuais</div>
+                <div class="chirps-info-title">Recordes Anuais ${iconeTooltip("recordes")}</div>
                 <div class="chirps-info-detalhe">Mais chuvoso: <strong>${r.ano_mais_chuvoso.ano}</strong> (${r.ano_mais_chuvoso.total_mm.toFixed(0)} mm)</div>
                 <div class="chirps-info-detalhe">Mais seco: <strong>${r.ano_mais_seco.ano}</strong> (${r.ano_mais_seco.total_mm.toFixed(0)} mm)</div>
-            ` : `<div class="chirps-info-title">Recordes Anuais</div><div class="chirps-info-valor">—</div>`;
+            ` : `<div class="chirps-info-title">Recordes Anuais ${iconeTooltip("recordes")}</div><div class="chirps-info-valor">—</div>`;
 
             document.getElementById("recordeMesCard").innerHTML = r ? `
-                <div class="chirps-info-title">Recordes Mensais</div>
+                <div class="chirps-info-title">Recordes Mensais ${iconeTooltip("recordes")}</div>
                 <div class="chirps-info-detalhe">Mais chuvoso: <strong>${formatarMesAno(r.mes_mais_chuvoso.date)}</strong> (${r.mes_mais_chuvoso.total_mm.toFixed(0)} mm)</div>
                 <div class="chirps-info-detalhe">Mais seco: <strong>${formatarMesAno(r.mes_mais_seco.date)}</strong> (${r.mes_mais_seco.total_mm.toFixed(1)} mm)</div>
-            ` : `<div class="chirps-info-title">Recordes Mensais</div><div class="chirps-info-valor">—</div>`;
+            ` : `<div class="chirps-info-title">Recordes Mensais ${iconeTooltip("recordes")}</div><div class="chirps-info-valor">—</div>`;
 
             // --- Tendência de longo prazo (Mann-Kendall + Sen's slope) ---
             const t = dados.tendencia;
@@ -1685,7 +1748,7 @@
                 const sinal = t.slope_mm_por_ano >= 0 ? "+" : "";
                 destaque.className = `tendencia-destaque mb-3 ${classe}`;
                 destaque.innerHTML = `
-                    <div class="tendencia-titulo">Tendência de Longo Prazo (${t.n_anos} anos, Mann-Kendall + Sen's slope)</div>
+                    <div class="tendencia-titulo">Tendência de Longo Prazo (${t.n_anos} anos, Mann-Kendall + Sen's slope) ${iconeTooltip("tendencia")}</div>
                     <div class="tendencia-valor">${sinal}${t.slope_mm_por_ano.toFixed(2)} mm/ano</div>
                     <div class="tendencia-detalhe">Chuva anual apresenta ${direcaoTexto} (p=${t.p_valor.toFixed(3)}).</div>
                 `;
@@ -1693,12 +1756,14 @@
             } else {
                 destaque.className = "tendencia-destaque mb-3 tendencia-sem-significancia";
                 destaque.innerHTML = `
-                    <div class="tendencia-titulo">Tendência de Longo Prazo</div>
+                    <div class="tendencia-titulo">Tendência de Longo Prazo ${iconeTooltip("tendencia")}</div>
                     <div class="tendencia-valor">—</div>
                     <div class="tendencia-detalhe">Histórico insuficiente ainda.</div>
                 `;
             }
             preencherExplicacao("tendenciaAnual", CONCEITOS_GRAFICOS.tendenciaAnual, t ? t.interpretacao : null);
+
+            inicializarTooltips(container);
         }
 
         function renderizarGraficoTendencia(t) {

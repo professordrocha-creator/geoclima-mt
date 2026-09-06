@@ -3,6 +3,68 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-09-06 (continuação 8) — Ícone "?" de explicação em todos os cards de número (Home + Calculadora)
+
+**Pedido do usuário**: os cards de número (ex.: "RMSE 23,64") não
+explicam o que significam nem se o valor é bom ou ruim — alguém de fora
+da área (ex.: produtor rural) não entende sozinho. Pedido pra acrescentar
+um ícone "?" com tooltip em CADA card de número da home pública e da
+calculadora, funcionando tanto no hover (desktop) quanto no toque
+(celular) — `title` do HTML puro não funciona bem em touch.
+
+**Componente**: Bootstrap 5 Tooltip (já carregado via
+`bootstrap.bundle.min.js` em `base.html`/`index.html`, nenhuma lib
+nova) num `<button type="button">` real, `trigger: "hover focus"`. A
+escolha de um `<button>` de verdade (não um `<span>`) é o que resolve o
+toque: um botão recebe FOCO tanto no clique do mouse quanto no toque no
+celular — o tooltip abre no foco (funciona em touch) e no hover
+(funciona no mouse), sem depender de simular "passar o mouse" onde não
+existe mouse.
+
+**Home** (`core/templates/core/index.html`): novo dict
+`EXPLICACOES_TOOLTIP` (9 chaves: spi, anomalia, percentil, acumulados,
+veranico, diasChuvosos, intensidade, recordes, tendencia) + helper
+`iconeTooltip(chave)` (gera o botão, escapando o texto pro atributo
+`title`) + `inicializarTooltips(raiz)` (instancia o Bootstrap Tooltip em
+todo botão novo, chamado ao final de `renderizarIndicadoresClimaticos` e
+`renderizarIndicadoresFase2` — o conteúdo é recriado do zero a cada
+município escolhido, então os botões são sempre elementos novos). Dois
+cabeçalhos de seção novos (adição, não quebra nada): "Índice de
+Seca/Chuva (SPI)" acima do grid de 4 escalas e "Chuva Acumulada Recente"
+acima dos cards de 7/30/90 dias — nenhum dos dois tinha título antes.
+11 ícones ao todo (9 explicações distintas; veranico e recordes
+aparecem em 2 cards cada, mesma frase, porque são 2 cards físicos
+separados).
+
+**Calculadora** (`core/templates/core/calculadora.html`): os 6 botões
+das métricas de validação (R², RMSE, MAE, MBE, índice d, índice c) vêm
+direto no HTML (página renderizada uma vez por POST, sem re-render
+dinâmico — não precisa do dict/helper JS da home), com o mesmo CSS
+(`.tooltip-info-btn`) e a mesma opção de trigger, inicializados com uma
+chamada única `bootstrap.Tooltip` no carregamento. Um ajuste pedido
+depois da revisão dos textos: o texto do índice c passou a citar
+"conforme os critérios de Camargo & Sentelhas (1997)" — métrica
+brasileira menos conhecida internacionalmente, citar a origem ancora na
+literatura.
+
+**Testado com Playwright de verdade (não por inspeção de código)**,
+reaproveitando a mesma instalação isolada da correção do PDF: (1)
+hover no desktop abre o tooltip, lido via `.tooltip.show[role="tooltip"]`
+no DOM — testado na Home e na Calculadora; (2) **toque emulado (device
+"iPhone 13" do Playwright) abre o tooltip com um `tap()`** — testado nas
+duas páginas, é a confirmação explícita pedida pelo usuário de que
+funciona no celular, não só no hover; (3) tocar em outro lugar da
+página FECHA o tooltip (perda de foco), confirmando que não fica preso
+na tela; (4) os 6 textos da calculadora lidos direto do
+`data-bs-original-title` (Bootstrap move o `title` original pra esse
+atributo ao inicializar, pra não sobrepor o tooltip nativo do
+navegador — confirmado que o texto do índice c inclui a citação
+Camargo & Sentelhas corretamente, sem escapes quebrados); (5)
+screenshots reais de cada seção (SPI, Anomalia/Percentil, Fase 2
+completa, Calculadora) confirmando visualmente ícones discretos, sem
+poluir os cards nem quebrar layout existente. Não tocou painel
+privado.
+
 ## 2026-09-06 (continuação 7) — Corrige PDF da calculadora: 5 dos 6 gráficos saíam em branco na impressão
 
 **Bug reportado pelo usuário**: no PDF gerado por `window.print()`, só o

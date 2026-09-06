@@ -41,6 +41,12 @@
     .explicacao-painel .explicacao-rotulo { font-weight: 600; color: #343a40; }
     .explicacao-painel > div + div { margin-top: 0.35rem; }
 
+    /* Ícone "?" de explicação rápida nos cards de métrica — mesmo
+       componente/CSS da home pública (core/index.html): tooltip do
+       Bootstrap num <button> real, hover no desktop e toque no celular. */
+    .tooltip-info-btn { display: inline-flex; align-items: center; justify-content: center; width: 1.05rem; height: 1.05rem; border-radius: 50%; border: 1px solid #adb5bd; background-color: #fff; color: #6c757d; font-size: 0.68rem; font-weight: 700; line-height: 1; padding: 0; cursor: help; vertical-align: middle; margin-left: 0.3rem; }
+    .tooltip-info-btn:hover, .tooltip-info-btn:focus { background-color: #e9ecef; color: #343a40; }
+
     @media print {
         .navbar, footer, #calculadoraFormCard, .no-print { display: none !important; }
         .card-calculadora { box-shadow: none; padding: 0; max-width: 100%; }
@@ -117,22 +123,22 @@
 
             <div class="row g-2 mb-4">
                 <div class="col-6 col-md-4 col-lg-2">
-                    <div class="metrica-card"><div class="metrica-titulo">R²</div><div class="metrica-valor">{{ resultado.metricas.r2|floatformat:3 }}</div></div>
+                    <div class="metrica-card"><div class="metrica-titulo">R² <button type="button" class="tooltip-info-btn" data-bs-toggle="tooltip" title="Mede se as duas séries de chuva sobem e descem juntas (correlação ao quadrado). Vai de 0 a 1 — quanto mais perto de 1, mais o CHIRPS acompanha as variações do pluviômetro. Não mede se os valores em mm são parecidos, só se variam na mesma direção (para isso, veja o índice d).">?</button></div><div class="metrica-valor">{{ resultado.metricas.r2|floatformat:3 }}</div></div>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <div class="metrica-card"><div class="metrica-titulo">RMSE (mm)</div><div class="metrica-valor">{{ resultado.metricas.rmse|floatformat:2 }}</div></div>
+                    <div class="metrica-card"><div class="metrica-titulo">RMSE (mm) <button type="button" class="tooltip-info-btn" data-bs-toggle="tooltip" title="Erro médio entre CHIRPS e o pluviômetro, em mm, dando mais peso aos erros grandes. Quanto menor, melhor — não tem limite máximo, só faz sentido comparado à escala de chuva do local.">?</button></div><div class="metrica-valor">{{ resultado.metricas.rmse|floatformat:2 }}</div></div>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <div class="metrica-card"><div class="metrica-titulo">MAE (mm)</div><div class="metrica-valor">{{ resultado.metricas.mae|floatformat:2 }}</div></div>
+                    <div class="metrica-card"><div class="metrica-titulo">MAE (mm) <button type="button" class="tooltip-info-btn" data-bs-toggle="tooltip" title="Diferença média absoluta entre CHIRPS e o pluviômetro, em mm — cada erro pesa igual, sem peso extra aos maiores (diferente do RMSE). Quanto menor, melhor.">?</button></div><div class="metrica-valor">{{ resultado.metricas.mae|floatformat:2 }}</div></div>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <div class="metrica-card"><div class="metrica-titulo">MBE (mm)</div><div class="metrica-valor">{{ resultado.metricas.mbe|floatformat:2 }}</div></div>
+                    <div class="metrica-card"><div class="metrica-titulo">MBE (mm) <button type="button" class="tooltip-info-btn" data-bs-toggle="tooltip" title="Viés médio: mostra se o CHIRPS tende a superestimar (valor positivo) ou subestimar (valor negativo) a chuva em relação ao pluviômetro. Perto de zero indica que não há tendência sistemática.">?</button></div><div class="metrica-valor">{{ resultado.metricas.mbe|floatformat:2 }}</div></div>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <div class="metrica-card"><div class="metrica-titulo">Índice d</div><div class="metrica-valor">{{ resultado.metricas.indice_d|floatformat:3 }}</div></div>
+                    <div class="metrica-card"><div class="metrica-titulo">Índice d <button type="button" class="tooltip-info-btn" data-bs-toggle="tooltip" title="Concordância entre as duas séries, de 0 a 1 — quanto mais perto de 1, melhor. Diferente do R², também penaliza diferença de valor: duas séries podem variar juntas e ainda discordar no tamanho da chuva.">?</button></div><div class="metrica-valor">{{ resultado.metricas.indice_d|floatformat:3 }}</div></div>
                 </div>
                 <div class="col-6 col-md-4 col-lg-2">
-                    <div class="metrica-card"><div class="metrica-titulo">Índice c</div><div class="metrica-valor">{{ resultado.metricas.indice_c|floatformat:3 }}</div></div>
+                    <div class="metrica-card"><div class="metrica-titulo">Índice c <button type="button" class="tooltip-info-btn" data-bs-toggle="tooltip" title="Combina correlação e concordância (r × índice d) numa classificação única de desempenho, de &quot;péssimo&quot; a &quot;ótimo&quot;, conforme os critérios de Camargo &amp; Sentelhas (1997) — o resumo mais direto pra saber se o CHIRPS é confiável neste conjunto de dados.">?</button></div><div class="metrica-valor">{{ resultado.metricas.indice_c|floatformat:3 }}</div></div>
                 </div>
             </div>
             <p class="text-muted small">Desempenho (índice c): <strong>{{ resultado.metricas.desempenho_c }}</strong></p>
@@ -270,6 +276,15 @@
         const interpretacoes = JSON.parse(document.getElementById("interpretacoesCalculadora").textContent);
         const pares = dados.pares; // [{data, chirps, local, diferenca}, ...], já ordenado por data
         const granularidade = dados.granularidade;
+
+        // Tooltip "?" das 6 métricas — mesmo componente/opções da home
+        // pública (core/index.html): Bootstrap Tooltip em <button> real,
+        // trigger "hover focus" pra funcionar tanto no mouse quanto no
+        // toque (foco real do botão). Página renderizada uma vez por
+        // POST, sem re-render dinâmico depois — init único basta aqui.
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+            new bootstrap.Tooltip(el, { trigger: "hover focus", placement: "top" });
+        });
 
         // ==================== Conceito (fixo) + interpretação (dinâmica) ====================
         const CONCEITOS_CALCULADORA = {
