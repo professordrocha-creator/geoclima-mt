@@ -129,6 +129,15 @@
            classes de cor acima, só menor pra caber acima do gráfico. */
         .tendencia-destaque-mini { border-radius: 0.6rem; padding: 0.6rem 1rem; margin-bottom: 0.75rem; font-size: 0.85rem; }
 
+        /* Explicação em duas partes (conceito fixo + interpretação dos
+           dados reais) de cada gráfico — escondida por padrão, expande
+           com o botão "ℹ️", pra não poluir o gráfico. */
+        .explicacao-toggle-btn { font-size: 0.78rem; color: #6c757d; background: none; border: none; padding: 0.2rem 0; cursor: pointer; text-decoration: underline dotted; }
+        .explicacao-toggle-btn:hover { color: #343a40; }
+        .explicacao-painel { background-color: #f8f9fa; border-radius: 0.6rem; padding: 0.75rem 1rem; margin: 0.4rem 0 0.75rem; font-size: 0.85rem; color: #495057; line-height: 1.5; }
+        .explicacao-painel .explicacao-rotulo { font-weight: 600; color: #343a40; }
+        .explicacao-painel > div + div { margin-top: 0.35rem; }
+
     </style>
 </head>
 <body>
@@ -313,10 +322,12 @@
         <div class="row mt-4 mb-4">
             <div class="col-12">
                 <div class="card p-3 shadow-sm" style="border-radius: 1rem; background-color: #ffffff;">
-                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
                         <h5 class="fw-bold mb-0" style="color: #1a1a1a;" id="choroplethTitulo">🗺️ Precipitação por Município — CHIRPS</h5>
                         <small class="text-muted">Dados: CHIRPS | Base cartográfica: OpenStreetMap</small>
                     </div>
+                    <p class="text-muted small mb-1" style="font-style: italic;">Dados reais de precipitação estimados por satélite (CHIRPS) — a mesma fonte usada em toda a plataforma, não valores fictícios ou de demonstração.</p>
+                    <p class="text-muted small mb-2">Cada município é colorido pela chuva acumulada no mês indicado no título — cores mais escuras indicam mais chuva; mais claras, menos chuva. Municípios em cinza não têm dado disponível no período.</p>
                     <div style="position: relative; width: 100%; height: 500px; border-radius: 0.8rem; overflow: hidden;">
                         <div id="choroplethMap" style="width: 100%; height: 100%;"></div>
                     </div>
@@ -605,12 +616,19 @@
         let choroplethMapInstance = null;
         let choroplethLayer = null;
 
+        // Limites de navegação (MT + margem) — impede o usuário de arrastar o
+        // mapa até sair do estado (ex.: acabar vendo o Caribe). Calculado a
+        // partir do bbox real dos 142 municípios (-61.63/-50.22 lon,
+        // -18.04/-7.35 lat) mais ~1,7° de margem visual em cada lado.
+        const LIMITES_NAVEGACAO_MT = L.latLngBounds([-19.5, -63.5], [-5.8, -48.5]);
+        let choroplethBoundsIniciais = null; // enquadramento inicial, pro botão "Voltar para MT"
+
         async function initChoroplethMap() {
             const elemento = document.getElementById("choroplethMap");
             if (!elemento) return;
 
             try {
-                choroplethMapInstance = L.map("choroplethMap").setView([-12.6, -55.9], 5);
+                choroplethMapInstance = L.map("choroplethMap", { maxBoundsViscosity: 1.0 }).setView([-12.6, -55.9], 5);
                 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
                     attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
                     maxZoom: 19,
@@ -646,13 +664,46 @@
                     },
                 }).addTo(choroplethMapInstance);
 
-                choroplethMapInstance.fitBounds(choroplethLayer.getBounds());
+                choroplethBoundsIniciais = choroplethLayer.getBounds();
+                choroplethMapInstance.fitBounds(choroplethBoundsIniciais);
 
+                // Zoom mínimo calculado A PARTIR do zoom que efetivamente
+                // enquadrou MT nesta tela (varia com o tamanho do container,
+                // ex. celular vs. desktop) — evita travar um número fixo que
+                // cortaria o estado numa tela estreita. Uma margem de 1 nível
+                // pra trás ainda permite um pouco de zoom out sem sair do
+                // continente sul-americano inteiro.
+                const zoomDoEnquadramento = choroplethMapInstance.getZoom();
+                choroplethMapInstance.setMinZoom(Math.max(zoomDoEnquadramento - 1, 3));
+                choroplethMapInstance.setMaxBounds(LIMITES_NAVEGACAO_MT);
+
+                adicionarBotaoVoltarMT();
                 renderizarLegendaChoropleth(dados.legenda);
             } catch (error) {
                 console.error("Erro ao carregar o mapa de precipitação por município:", error);
                 elemento.innerHTML = `<div class="alert alert-danger m-2">Não foi possível carregar o mapa de precipitação agora.</div>`;
             }
+        }
+
+        // Botão discreto pra quem se perder navegando (mesmo com maxBounds,
+        // um zoom/arrasto no limite do estado pode deixar a visão torta) —
+        // reseta pro mesmo enquadramento inicial calculado no carregamento.
+        function adicionarBotaoVoltarMT() {
+            const controle = L.control({ position: "topright" });
+            controle.onAdd = function () {
+                const botao = L.DomUtil.create("button", "btn btn-sm btn-light shadow-sm");
+                botao.type = "button";
+                botao.innerHTML = "📍 Voltar para MT";
+                botao.style.cursor = "pointer";
+                L.DomEvent.disableClickPropagation(botao);
+                botao.addEventListener("click", () => {
+                    if (choroplethBoundsIniciais) {
+                        choroplethMapInstance.fitBounds(choroplethBoundsIniciais);
+                    }
+                });
+                return botao;
+            };
+            controle.addTo(choroplethMapInstance);
         }
 
         function renderizarLegendaChoropleth(legenda) {
@@ -672,6 +723,7 @@
                     html += `<div><span class="legenda-swatch" style="background:${paleta[i]}"></span>${rotulo}</div>`;
                 }
                 html += `<div><span class="legenda-swatch" style="background:${cor_sem_dado}"></span>Sem dado</div>`;
+                html += `<div style="font-size: 0.7rem; color: #6c757d; max-width: 190px; margin-top: 0.3rem;">As faixas se ajustam à distribuição de chuva do mês mostrado, para destacar as diferenças entre municípios — os valores mudam de mês para mês, não são faixas fixas.</div>`;
 
                 div.innerHTML = html;
                 return div;
@@ -819,6 +871,8 @@
         // pra não misturar série de um município com outro).
         let municipioIdAtual = null;
         let spiSerieCacheAtual = {};   // { escala: [{date, value, classification}, ...] }
+        let spiInterpretacaoCacheAtual = {};   // { escala: "texto..." } — interpretação por escala individual
+        let spiTodasInterpretacaoAtual = null;   // interpretação do modo "Todas" (vem de /indicadores/)
         let spiEscalaAtual = 3;
         let spiAnosAtual = 10;
         let spiEvolucaoChartInstance = null;
@@ -835,6 +889,49 @@
             seca_extrema: "Seca Extrema",
         };
         const MESES_ABREV = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+        // ==================== EXPLICAÇÃO DOS GRÁFICOS (conceito + interpretação) ====================
+        // Conceito: fixo, mesma frase pra qualquer município — a "chave de
+        // leitura". Interpretação: dinâmica, vem pronta do backend (já
+        // descreve os dados REAIS daquele município — nunca prevê nem
+        // prescreve, ver climate/municipio_narrativas.py).
+        const CONCEITOS_GRAFICOS = {
+            spiIndividual: "O SPI (Índice de Precipitação Padronizada) compara a chuva de um período com o histórico da mesma região. Valores negativos indicam períodos mais secos que o normal; valores positivos, mais chuvosos; valores perto de zero, dentro do padrão normal.",
+            spiTodas: "O SPI (Índice de Precipitação Padronizada) compara a chuva de um período com o histórico da mesma região. Valores negativos indicam períodos mais secos que o normal; valores positivos, mais chuvosos; valores perto de zero, dentro do padrão normal. Escalas mais curtas (SPI-1) reagem mais rápido a mudanças na chuva; escalas mais longas (SPI-12) mudam mais devagar, refletindo tendências de prazo mais longo.",
+            climatologia: "Mostra a média histórica de chuva de cada mês do ano, calculada sobre os 45 anos de dados disponíveis — o padrão típico da região ao longo do ano.",
+            tendenciaAnual: "Cada ponto do gráfico é o total de chuva de um ano. A linha tracejada mostra a tendência de longo prazo, calculada com um teste estatístico (Mann-Kendall) que avalia se a mudança é consistente ao longo do tempo ou só variação natural.",
+            diasChuvosos: "Mostra quantos dias, em cada ano, tiveram chuva acima do limiar escolhido (1, 5 ou 10mm) — indica se a chuva está distribuída em mais dias ou concentrada em menos dias.",
+            intensidade: "Mostra, em cada ano, a média de chuva (mm) nos dias em que efetivamente choveu — indica se a chuva costuma ser fraca ou forte quando ocorre.",
+            veranico: "Mostra, em cada ano, o maior número de dias seguidos sem chuva significativa (abaixo de 1mm) — um período seco prolongado dentro do ano.",
+            assinatura: "Compara quantos dias choveu (barras) com a força média de cada chuva (linha) no mesmo gráfico — mostra se a chuva está mudando de padrão, por exemplo chovendo em menos dias mas com mais força em cada evento.",
+        };
+
+        function htmlBlocoExplicacao(idBase) {
+            return `
+                <div class="text-end">
+                    <button type="button" class="explicacao-toggle-btn" onclick="toggleExplicacao('${idBase}')">ℹ️ O que este gráfico mostra</button>
+                </div>
+                <div class="explicacao-painel" id="${idBase}Painel" style="display: none;">
+                    <div><span class="explicacao-rotulo">O que é:</span> <span id="${idBase}Conceito"></span></div>
+                    <div><span class="explicacao-rotulo">Neste município:</span> <span id="${idBase}Interpretacao">—</span></div>
+                </div>
+            `;
+        }
+
+        function toggleExplicacao(idBase) {
+            const painel = document.getElementById(`${idBase}Painel`);
+            if (!painel) return;
+            painel.style.display = painel.style.display === "none" ? "block" : "none";
+        }
+
+        function preencherExplicacao(idBase, conceito, interpretacao) {
+            const elConceito = document.getElementById(`${idBase}Conceito`);
+            const elInterpretacao = document.getElementById(`${idBase}Interpretacao`);
+            if (elConceito) elConceito.textContent = conceito;
+            if (elInterpretacao) {
+                elInterpretacao.textContent = interpretacao || "Histórico insuficiente pra gerar essa leitura neste município.";
+            }
+        }
 
         // Modo "Todas" do gráfico de evolução do SPI — 4 escalas sobrepostas.
         const ESCALAS_SPI_TODAS = [1, 3, 6, 12];
@@ -918,6 +1015,7 @@
                             <button type="button" class="btn btn-outline-secondary spi-periodo-btn" data-anos="0">Tudo</button>
                         </div>
                     </div>
+                    ${htmlBlocoExplicacao("spi")}
                     <div style="position: relative; height: 280px;">
                         <canvas id="spiEvolucaoChart"></canvas>
                     </div>
@@ -933,6 +1031,7 @@
                 </div>
                 <div class="chirps-chart-container mb-3">
                     <h6 class="section-title mb-2">Climatologia Mensal (média histórica, mm)</h6>
+                    ${htmlBlocoExplicacao("climatologia")}
                     <div style="position: relative; height: 280px;">
                         <canvas id="climatologiaChart"></canvas>
                     </div>
@@ -960,6 +1059,8 @@
             // --- Evolução do SPI (escondida até o clique) ---
             municipioIdAtual = dados.municipio.id;
             spiSerieCacheAtual = {};
+            spiInterpretacaoCacheAtual = {};
+            spiTodasInterpretacaoAtual = dados.spi_interpretacao;
             spiEscalaAtual = 3;
             spiAnosAtual = 10;
             configurarPainelEvolucaoSpi();
@@ -1012,6 +1113,7 @@
             `;
 
             renderizarGraficoClimatologia(dados.climatologia_mensal);
+            preencherExplicacao("climatologia", CONCEITOS_GRAFICOS.climatologia, dados.climatologia_interpretacao);
 
             // --- Acumulados 7/30/90 dias ---
             const acumuladosGrid = document.getElementById("acumuladosGrid");
@@ -1105,6 +1207,7 @@
                         if (!response.ok) throw new Error(`HTTP ${response.status}`);
                         const dados = await response.json();
                         spiSerieCacheAtual[escala] = dados.serie;
+                        spiInterpretacaoCacheAtual[escala] = dados.interpretacao;
                     } catch (error) {
                         console.error(`Erro ao carregar série de SPI-${escala}:`, error);
                         spiSerieCacheAtual[escala] = [];
@@ -1165,9 +1268,12 @@
             }
 
             if (spiEscalaAtual === "todas") {
+                preencherExplicacao("spi", CONCEITOS_GRAFICOS.spiTodas, spiTodasInterpretacaoAtual);
                 desenharGraficoSpiTodasEscalas(canvas, semDadoAviso);
                 return;
             }
+
+            preencherExplicacao("spi", CONCEITOS_GRAFICOS.spiIndividual, spiInterpretacaoCacheAtual[spiEscalaAtual]);
 
             const serie = filtrarSeriePorPeriodo(spiSerieCacheAtual[spiEscalaAtual] || []);
             if (serieSpiEhVazia(serie)) {
@@ -1356,6 +1462,7 @@
                             <button type="button" class="btn btn-outline-secondary dc-limiar-btn" data-limiar="10">&gt; 10mm</button>
                         </div>
                     </div>
+                    ${htmlBlocoExplicacao("diasChuvosos")}
                     <div id="diasChuvososTendenciaTexto"></div>
                     <div style="position: relative; height: 280px;">
                         <canvas id="diasChuvososEvolucaoChart"></canvas>
@@ -1363,6 +1470,7 @@
                 </div>
 
                 <div class="spi-evolucao-painel mb-3" id="intensidadeEvolucaoPainel" style="display: none;">
+                    ${htmlBlocoExplicacao("intensidade")}
                     <div id="intensidadeTendenciaTexto"></div>
                     <div style="position: relative; height: 280px;">
                         <canvas id="intensidadeEvolucaoChart"></canvas>
@@ -1370,6 +1478,7 @@
                 </div>
 
                 <div class="spi-evolucao-painel mb-3" id="veranicoEvolucaoPainel" style="display: none;">
+                    ${htmlBlocoExplicacao("veranico")}
                     <div id="veranicoTendenciaTexto"></div>
                     <div style="position: relative; height: 280px;">
                         <canvas id="veranicoEvolucaoChart"></canvas>
@@ -1377,9 +1486,7 @@
                 </div>
 
                 <div class="spi-evolucao-painel mb-3" id="assinaturaPainel" style="display: none;">
-                    <p class="chirps-placeholder mb-2" style="text-align: left; padding: 0;">
-                        Frequência (barras, dias com chuva) e intensidade (linha, mm por dia chuvoso) no mesmo gráfico — revela se a chuva está mudando de padrão (menos vezes, porém mais forte por evento, ou o contrário).
-                    </p>
+                    ${htmlBlocoExplicacao("assinatura")}
                     <div style="position: relative; height: 300px;">
                         <canvas id="assinaturaChart"></canvas>
                     </div>
@@ -1388,6 +1495,7 @@
                 <div class="tendencia-destaque mb-3" id="tendenciaDestaque"></div>
                 <div class="chirps-chart-container">
                     <h6 class="section-title mb-2">Totais Anuais de Chuva e Tendência de Longo Prazo</h6>
+                    ${htmlBlocoExplicacao("tendenciaAnual")}
                     <div style="position: relative; height: 280px;">
                         <canvas id="tendenciaChart"></canvas>
                     </div>
@@ -1483,6 +1591,7 @@
                     <div class="tendencia-detalhe">Histórico insuficiente ainda.</div>
                 `;
             }
+            preencherExplicacao("tendenciaAnual", CONCEITOS_GRAFICOS.tendenciaAnual, t ? t.interpretacao : null);
         }
 
         function renderizarGraficoTendencia(t) {
@@ -1646,6 +1755,7 @@
             renderizarDestaqueTendencia("diasChuvososTendenciaTexto", bloco.tendencia, "dias/ano", {
                 aumento: "aumento", reducao: "redução", estavelQuandoNaoSignificativo: false,
             });
+            preencherExplicacao("diasChuvosos", CONCEITOS_GRAFICOS.diasChuvosos, bloco.interpretacao);
 
             if (diasChuvososEvolucaoChartInstance) diasChuvososEvolucaoChartInstance.destroy();
             diasChuvososEvolucaoChartInstance = new Chart(canvas, {
@@ -1695,6 +1805,7 @@
             renderizarDestaqueTendencia("intensidadeTendenciaTexto", dados.intensidade.tendencia, "mm/dia chuvoso/ano", {
                 aumento: "intensificação", reducao: "redução de intensidade", estavelQuandoNaoSignificativo: true,
             });
+            preencherExplicacao("intensidade", CONCEITOS_GRAFICOS.intensidade, dados.intensidade.interpretacao);
 
             // Reta de Sen's slope DESSA série (independente da tendência do
             // total anual) — só desenha se houve histórico suficiente.
@@ -1749,6 +1860,7 @@
             renderizarDestaqueTendencia("veranicoTendenciaTexto", dados.veranico_maximo.tendencia, "dias/ano", {
                 aumento: "aumento", reducao: "redução", estavelQuandoNaoSignificativo: false,
             });
+            preencherExplicacao("veranico", CONCEITOS_GRAFICOS.veranico, dados.veranico_maximo.interpretacao);
 
             if (veranicoEvolucaoChartInstance) veranicoEvolucaoChartInstance.destroy();
             veranicoEvolucaoChartInstance = new Chart(canvas, {
@@ -1788,6 +1900,8 @@
             const intensidadeValores = anos.map(ano => (
                 intensidadeSerie[ano] ? intensidadeSerie[ano].intensidade_mm_por_dia_chuvoso : null
             ));
+
+            preencherExplicacao("assinatura", CONCEITOS_GRAFICOS.assinatura, dados.assinatura_interpretacao);
 
             if (assinaturaChartInstance) assinaturaChartInstance.destroy();
             assinaturaChartInstance = new Chart(canvas, {

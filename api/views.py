@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from climate import municipio_indicators as mi
+from climate import municipio_narrativas as nar
 from climate.models import ChirpsData
 from climate.municipio_exports import gerar_workbook_municipio
 from maps.models import Municipio
@@ -174,6 +175,7 @@ def municipio_indicadores(request, municipio_id):
     anomalia = mi.anomalia_mensal(municipio)
     percentil = mi.percentil_historico_mensal(municipio)
     acumulados = mi.acumulados_municipio(municipio)
+    climatologia = mi.climatologia_mensal(municipio)
 
     return JsonResponse({
         "municipio": {
@@ -183,9 +185,11 @@ def municipio_indicadores(request, municipio_id):
             "codigo_ibge": municipio.codigo_ibge,
         },
         "spi": spi,
+        "spi_interpretacao": nar.interpretar_spi_todas_escalas(spi),
         "anomalia_mensal": anomalia,
         "percentil_historico": percentil,
-        "climatologia_mensal": mi.climatologia_mensal(municipio),
+        "climatologia_mensal": climatologia,
+        "climatologia_interpretacao": nar.interpretar_climatologia(climatologia),
         "acumulados": acumulados,
         "fonte": "CHIRPS",
     })
@@ -218,6 +222,7 @@ def municipio_spi_serie(request, municipio_id):
     return JsonResponse({
         "municipio": {"id": municipio.id, "nome": municipio.nome, "uf": municipio.uf},
         "escala": escala,
+        "interpretacao": nar.interpretar_spi_serie(serie, escala),
         "serie": [
             {
                 "date": ponto["date"].isoformat(),
@@ -274,7 +279,10 @@ def municipio_indicadores_fase2(request, municipio_id):
             "mes_mais_seco": _formatar_recorde_mes(recordes["mes_mais_seco"]),
             "n_anos_historico": recordes["n_anos_historico"],
         } if recordes else None,
-        "tendencia": tendencia,
+        "tendencia": (
+            {**tendencia, "interpretacao": nar.interpretar_tendencia_narrativa(tendencia, "aumento", "redução")}
+            if tendencia else None
+        ),
         "fonte": "CHIRPS",
     })
 
@@ -296,17 +304,45 @@ def municipio_series_anuais(request, municipio_id):
     intensidade_serie = mi.intensidade_serie_anual(municipio)
     veranico_serie = mi.veranico_maximo_serie_anual(municipio)
 
+    dias_chuvosos_resposta = None
+    if dias_chuvosos_serie:
+        dias_chuvosos_resposta = {
+            limiar: {
+                **bloco,
+                "interpretacao": nar.interpretar_tendencia_narrativa(bloco["tendencia"], "aumento", "redução"),
+            }
+            for limiar, bloco in dias_chuvosos_serie.items()
+        }
+
+    intensidade_resposta = None
+    if intensidade_serie:
+        intensidade_resposta = {
+            **intensidade_serie,
+            "interpretacao": nar.interpretar_tendencia_narrativa(
+                intensidade_serie["tendencia"], "intensificação", "redução de intensidade"
+            ),
+        }
+
+    veranico_resposta = None
+    if veranico_serie:
+        veranico_resposta = {
+            "serie": {ano: _formatar_veranico(sub) for ano, sub in veranico_serie["serie"].items()},
+            "tendencia": veranico_serie["tendencia"],
+            "interpretacao": nar.interpretar_tendencia_narrativa(veranico_serie["tendencia"], "aumento", "redução"),
+        }
+
+    assinatura_interpretacao = None
+    if dias_chuvosos_serie and intensidade_serie:
+        assinatura_interpretacao = nar.interpretar_assinatura(
+            dias_chuvosos_serie.get("1", {}).get("tendencia"), intensidade_serie["tendencia"]
+        )
+
     return JsonResponse({
         "municipio": {"id": municipio.id, "nome": municipio.nome, "uf": municipio.uf},
-        "dias_chuvosos": dias_chuvosos_serie,
-        "intensidade": intensidade_serie,
-        "veranico_maximo": (
-            {
-                "serie": {ano: _formatar_veranico(sub) for ano, sub in veranico_serie["serie"].items()},
-                "tendencia": veranico_serie["tendencia"],
-            }
-            if veranico_serie else None
-        ),
+        "dias_chuvosos": dias_chuvosos_resposta,
+        "intensidade": intensidade_resposta,
+        "veranico_maximo": veranico_resposta,
+        "assinatura_interpretacao": assinatura_interpretacao,
         "fonte": "CHIRPS",
     })
 

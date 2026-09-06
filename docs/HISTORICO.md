@@ -3,6 +3,130 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-09-06 (continuação 2) — Clareza do mapa choropleth: limites de navegação, credibilidade do dado, legenda explicada
+
+**Contexto:** pedido do usuário — o mapa deixava navegar pra fora de
+MT (até o Caribe), não deixava claro que é dado real (não
+demonstração), e a legenda mostrava faixas de mm sem explicar que elas
+mudam de mês pra mês. Textos revisados e aprovados pelo usuário ANTES
+de codar, incluindo um ajuste de precisão que eu levantei: a frase de
+credibilidade original pedida ("dados observados") foi trocada por
+"dados... estimados por satélite" — CHIRPS é uma estimativa de
+satélite calibrada com estações reais, não uma medição direta de
+pluviômetro (mesma distinção que o projeto já mantém em toda parte,
+ex. "não fingir que uma estimativa de satélite é uma medição de
+campo", Etapa 8.1). Usuário confirmou a versão mais precisa.
+
+**Limites de navegação**: `LIMITES_NAVEGACAO_MT` — bbox real dos 142
+municípios consultado no banco (`Extent('geom')`: lon -61,63 a
+-50,22; lat -18,04 a -7,35) mais ~1,7-1,9° de margem, aplicado via
+`setMaxBounds` + `maxBoundsViscosity: 1.0` (não deixa arrastar pra
+fora nem "escorregar" de volta). Zoom mínimo calculado
+DINAMICAMENTE a partir do zoom que o `fitBounds` inicial efetivamente
+usou pra enquadrar MT NESTA tela (varia com o tamanho do container —
+celular vs. desktop) menos 1 nível de folga, em vez de um número fixo
+que cortaria o estado numa tela estreita.
+
+**Botão "📍 Voltar para MT"**: controle Leaflet customizado (mesmo
+padrão da legenda), reseta pro enquadramento inicial guardado
+(`choroplethBoundsIniciais`, capturado no mesmo `fitBounds` que já
+existia). `L.DomEvent.disableClickPropagation` evita que o clique no
+botão interfira com o resto do mapa.
+
+**Textos novos**: linha de credibilidade em itálico sob o cabeçalho
+("Dados reais de precipitação estimados por satélite (CHIRPS) — a
+mesma fonte usada em toda a plataforma, não valores fictícios ou de
+demonstração"); nota na legenda explicando que as faixas se ajustam
+ao mês mostrado (evita a leitura errada de "até 2,2mm" como um valor
+fixo).
+
+**Não alterado**: o bloco `onEachFeature` (tooltip hover/toque +
+clique reaproveitando `aplicarSelecaoMunicipio`) — só as seções de
+inicialização do mapa e da legenda mudaram, confirmado por diff antes
+de considerar concluído.
+
+`manage.py check` limpo, JS revalidado com `node --check`. Sem
+ferramenta de navegador nesta sessão pra um clique real na tela —
+verificado por inspeção de código (o bloco de clique/tooltip não foi
+tocado) e pelos testes de endpoint já feitos nas entradas anteriores;
+recomendo uma conferência visual real antes de considerar fechado.
+
+## 2026-09-06 (continuação) — Explicação em duas partes (conceito + interpretação) nos 8 gráficos da home pública
+
+**Contexto:** pedido do usuário — cada gráfico da home ganha uma
+"chave de leitura" fixa (conceito, o que o gráfico mede) e um texto
+dinâmico (interpretação, gerado a partir do dado real daquele
+município). Regra crítica, confirmada por escrito antes de codar:
+interpretação SEMPRE descritiva — nunca prevê ("vai piorar") nem
+prescreve ("irrigue agora"), sempre com o número/p-valor junto pra
+ancorar a afirmação. Tom validado com exemplos reais (Cáceres) ANTES
+de implementar os 8 gráficos, plano curto revisado e aprovado.
+
+**`climate/municipio_narrativas.py`** (novo módulo, mesmo espírito de
+`dashboard/insights.py` — painel privado, NÃO tocado — mas escopado a
+município): funções puras que recebem dado JÁ CALCULADO por
+`climate.municipio_indicators` e só compõem a frase, nenhum cálculo
+novo.
+- `interpretar_spi_serie(serie, escala)` — condição atual + episódio
+  mais seco/úmido já registrado NO HISTÓRICO COMPLETO (não no recorte
+  de 5/10 anos que o usuário pode escolher ver no gráfico — decisão
+  deliberada, pra a leitura não mudar dependendo do zoom escolhido).
+- `interpretar_spi_todas_escalas(spi_por_escala)` — compara SPI-1
+  (curto prazo) com SPI-12 (longo prazo); só descreve os valores reais
+  e se convergem ou divergem, nunca infere o que vai acontecer.
+- `interpretar_climatologia(climatologia)` — mês mais chuvoso/seco da
+  média histórica.
+- `interpretar_tendencia_narrativa(tendencia, rotulo_aumento,
+  rotulo_reducao)` — envolve `mi.interpretar_tendencia` (já existe,
+  já usada na aba de Tendências do Excel — reaproveitada, não
+  duplicada) com uma frase extra decodificando "significativo"/"não
+  significativo" em linguagem simples. Usada em 4 dos 8 gráficos
+  (Tendência anual, Dias Chuvosos, Intensidade, Veranico).
+- `interpretar_assinatura(tendencia_dias, tendencia_intensidade)` —
+  só sintetiza uma frase tipo "chove em menos dias, mas a força de
+  cada chuva não mudou" nas combinações onde os DOIS testes sustentam
+  algo específico; fora disso, descreve cada uma separadamente sem
+  forçar uma síntese vazia.
+
+**Endpoints existentes ganharam campos novos** (nenhum endpoint novo):
+`/indicadores/` (`spi_interpretacao`, `climatologia_interpretacao`),
+`/spi-serie/` (`interpretacao`, calculada sobre a série completa antes
+da paginação de data pro frontend), `/indicadores-fase2/`
+(`tendencia.interpretacao`), `/series-anuais/`
+(`dias_chuvosos[limiar].interpretacao` — uma por limiar, já que cada
+limiar tem sua própria tendência —, `intensidade.interpretacao`,
+`veranico_maximo.interpretacao`, `assinatura_interpretacao`).
+
+**Frontend**: `htmlBlocoExplicacao(idBase)` gera o par botão "ℹ️ O
+que este gráfico mostra" + painel escondido (duas linhas: "O que é" e
+"Neste município"), reaproveitado nos 8 gráficos — 1 função, não 8
+implementações. `CONCEITOS_GRAFICOS` (JS) guarda o texto fixo de cada
+um. Choropleth ganhou só uma legenda persistente de uma linha (sem
+toggle — é uma nota sobre a escala de cor, não uma leitura por
+município).
+
+**Testado nos 4 endpoints** (Cáceres) — todos 200, interpretações
+reais geradas, exemplos conferidos quanto ao tom:
+- Tendência anual: *"Tendência de redução estatisticamente
+  significativa (p=0.011). Isso significa que a mudança é consistente
+  ao longo do tempo, não apenas uma variação ocasional de um ano para
+  outro."*
+- Veranico: *"Tendência de aumento estatisticamente significativa
+  (p=0.005)..."* — mesma fórmula, achado principal do projeto com o
+  mesmo rigor dos demais.
+- Caso NÃO significativo (dias chuvosos, Cuiabá): *"Tendência de
+  redução, NÃO estatisticamente significativa (p=0.083). Isso
+  significa que a variação observada pode ser apenas oscilação
+  natural..."* — confirma que o sistema não inventa tendência.
+- Assinatura: *"Dias de chuva: diminuindo de forma significativa.
+  Intensidade por dia chuvoso: estável (sem tendência estatisticamente
+  significativa, p=0.475). Ou seja: chove em menos dias, mas a força
+  de cada chuva não mudou de forma significativa."*
+
+`manage.py check` limpo, JS revalidado com `node --check`, 4 endpoints
+reconfirmados 200 após o restart final. Painel privado
+(`dashboard/insights.py`) não tocado.
+
 ## 2026-09-06 — Correção definitiva: "último período com dado real" vira fonte única de verdade (fecha o bug da anomalia/percentil + risco latente de dias_chuvosos/intensidade)
 
 **Contexto:** a entrada anterior deixou pendente um bug confirmado
