@@ -3,7 +3,7 @@
 {% block title %}Calculadora de Validação — MonitorChuva MT{% endblock %}
 {% block extra_head %}
 <style>
-    .card-calculadora { background-color: #ffffff; border-radius: 1rem; padding: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); width: 100%; max-width: 960px; }
+    .card-calculadora { position: relative; background-color: #ffffff; border-radius: 1rem; padding: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); width: 100%; max-width: 960px; }
     .card-calculadora h1 { font-size: 1.4rem; font-weight: 700; color: #1a1a1a; margin-bottom: 1.25rem; }
     .dica-formato { font-size: 0.85rem; color: #6c757d; background-color: #f8f9fa; border-radius: 0.6rem; padding: 0.8rem 1rem; margin-bottom: 1.25rem; }
 
@@ -19,10 +19,22 @@
     .tabela-pareada table { font-size: 0.85rem; }
 
     /* Abas dos gráficos + explicação (conceito + interpretação) — mesmo
-       padrão visual já validado na home pública (core/index.html). */
+       padrão visual já validado na home pública (core/index.html).
+
+       IMPORTANTE: a aba escondida NUNCA usa display:none. Os 6 gráficos
+       Chart.js são todos criados no carregamento da página (não um por
+       aba, sob demanda) — um canvas dentro de um ancestral display:none
+       nasce com dimensão zero, e não existe resize() que pinte um
+       conteúdo que nunca chegou a ser desenhado (bug real, encontrado
+       ao testar o PDF: só a aba visível na tela renderizava). Por isso
+       a aba inativa fica position:absolute + visibility:hidden — sai
+       do fluxo da página (não deixa buraco vazio) e some visualmente,
+       mas o navegador continua calculando uma largura/altura REAL pro
+       canvas o tempo todo, então o Chart.js sempre tem algo desenhado
+       pra mostrar, ativa ou não. */
     .aba-btn.active { background-color: #0d6efd; color: #fff; border-color: #0d6efd; }
-    .aba-conteudo { display: none; }
-    .aba-conteudo.aba-ativa { display: block; }
+    .aba-conteudo { position: absolute; top: 0; left: 0; right: 0; visibility: hidden; pointer-events: none; }
+    .aba-conteudo.aba-ativa { position: static; visibility: visible; pointer-events: auto; }
     .explicacao-toggle-btn { font-size: 0.78rem; color: #6c757d; background: none; border: none; padding: 0.2rem 0; cursor: pointer; text-decoration: underline dotted; }
     .explicacao-toggle-btn:hover { color: #343a40; }
     .explicacao-painel { background-color: #f8f9fa; border-radius: 0.6rem; padding: 0.75rem 1rem; margin: 0.4rem 0 0.75rem; font-size: 0.85rem; color: #495057; line-height: 1.5; }
@@ -32,9 +44,12 @@
     @media print {
         .navbar, footer, #calculadoraFormCard, .no-print { display: none !important; }
         .card-calculadora { box-shadow: none; padding: 0; max-width: 100%; }
-        /* No PDF (window.print), TODOS os gráficos aparecem empilhados —
-           não só a aba selecionada na tela. */
-        .aba-conteudo { display: block !important; margin-bottom: 2rem; page-break-inside: avoid; }
+        /* No PDF (window.print), TODAS as 6 abas voltam ao fluxo normal
+           (não só a selecionada na tela) — os gráficos já estavam
+           desenhados corretamente desde o carregamento da página (ver
+           comentário acima de .aba-conteudo), só precisam reaparecer no
+           lugar certo. */
+        .aba-conteudo { position: static !important; visibility: visible !important; margin-bottom: 2rem; page-break-inside: avoid; }
     }
 </style>
 {% endblock %}
@@ -306,11 +321,23 @@
             });
         });
 
-        // No PDF (window.print), todas as abas viram visíveis via CSS antes
-        // da captura — resize() em todos garante que nenhum gráfico fique
-        // com o tamanho de quando estava escondido (0px).
+        // No PDF (window.print), todas as abas voltam a position:static via
+        // CSS — os 6 gráficos já têm conteúdo desenhado desde o
+        // carregamento (canvas nunca fica com dimensão zero, ver CSS de
+        // .aba-conteudo acima), então isto aqui é reforço, não a correção
+        // principal: garante que a LARGURA final bata exatamente com a do
+        // layout impresso (a aba escondida é dimensionada pela largura do
+        // container, que pode diferir um pouco da largura definitiva assim
+        // que ela volta ao fluxo normal). resize() recalcula o tamanho;
+        // update() força o redesenho do conteúdo com esse tamanho (não só
+        // esticar/encolher o que já estava pintado).
         window.addEventListener("beforeprint", () => {
-            Object.values(graficosInstancias).forEach(chart => chart && chart.resize());
+            void document.body.offsetHeight; // força o layout a se atualizar antes de medir
+            Object.values(graficosInstancias).forEach(chart => {
+                if (!chart) return;
+                chart.resize();
+                chart.update();
+            });
         });
 
         // ==================== 1. Dispersão (CHIRPS × Medido) ====================

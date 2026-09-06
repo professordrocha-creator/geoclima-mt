@@ -3,6 +3,60 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-09-06 (continuação 7) — Corrige PDF da calculadora: 5 dos 6 gráficos saíam em branco na impressão
+
+**Bug reportado pelo usuário**: no PDF gerado por `window.print()`, só o
+gráfico da aba que estava visível na tela renderizava — os outros 5
+apareciam com título e ℹ️, mas o canvas saía em branco.
+
+**Causa raiz**: as abas escondidas usavam `display:none`. Os 6 gráficos
+Chart.js já eram criados todos no carregamento da página (não um por
+aba, sob demanda), mas um `<canvas>` dentro de um ancestral
+`display:none` nasce com dimensão zero — e não existe `resize()` que
+pinte um conteúdo que nunca chegou a ser desenhado. O `beforeprint`
+antigo chamava só `resize()` de cada gráfico, tarde demais e sem
+`update()`, então continuava sem conteúdo.
+
+**Correção** (opção "evitar o problema na origem", não remendar no
+momento do print): a aba inativa deixou de usar `display:none` e passou
+a usar `position: absolute; visibility: hidden; pointer-events: none`
+(a ativa vira `position: static; visibility: visible`). Sem
+`display:none`, o navegador sempre calcula uma largura/altura REAL pro
+canvas — os 6 gráficos ficam desenhados o tempo todo, mesmo os 5 fora
+de vista, e saem do fluxo da página (não sobra buraco vazio, a
+navegação por clique nas abas continua idêntica). `.card-calculadora`
+ganhou `position: relative` (referência de posicionamento pras abas
+absolutas). O CSS de impressão troca de `display:block` pra
+`position:static !important; visibility:visible !important` em todas
+as abas. O listener de `beforeprint` continua existindo, mas agora só
+como reforço de precisão (a largura da aba escondida, calculada contra
+a borda do container, pode diferir alguns pixels da largura definitiva
+assim que ela volta ao fluxo normal) — chama `resize()` **e** `update()`
+em cada gráfico (não só `resize()`), e força um reflow
+(`document.body.offsetHeight`) antes de medir.
+
+**Testado de verdade, não só por inspeção de código**: instalado
+Playwright (Chromium) num diretório isolado (`npm init` + `npm install`
+rodados na pasta de scratch da sessão, não no projeto — não gerou
+`package.json`/`node_modules` no repositório) pra rodar um teste real
+de navegador, já que esta sessão não tem ferramenta de browser
+embutida. Script fez POST real (upload do CSV sintético) contra o
+container rodando, leu o `ImageData` de cada um dos 6 `<canvas>` via
+`getContext("2d").getImageData()` — método objetivo: canvas nunca
+desenhado fica com todos os pixels `alpha=0`, um canvas com conteúdo
+tem pixels não-transparentes. Resultado, comparando ANTES/DEPOIS do
+`page.emulateMedia({media: "print"})` (disparando `beforeprint`
+manualmente, já que o Chromium via Playwright não dispara sozinho):
+os 6 canvas têm conteúdo (`blank: false`) tanto na tela normal quanto
+emulando impressão — inclusive as 5 abas nunca clicadas. Gerado também
+um PDF de verdade (`page.pdf()`) e uma screenshot em tela cheia com
+`media: print` emulado, confirmando visualmente os 6 gráficos
+empilhados com dado real desenhado (não placeholders em branco).
+Confirmado também, com uma segunda screenshot depois de clicar na aba
+"Erro × Magnitude", que a navegação por clique na tela continua
+funcionando sem regressão visual (sem buracos vazios das abas
+escondidas atrás).
+
 ## 2026-09-06 (continuação 6) — Calculadora de Validação ganha 5 gráficos novos (série temporal, resíduos, acumulado, histograma do erro, erro×magnitude)
 
 **Contexto**: a calculadora (continuação 3) só tinha o gráfico de
