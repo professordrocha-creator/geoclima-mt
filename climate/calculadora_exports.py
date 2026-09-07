@@ -41,7 +41,7 @@ def _aba_metadados(workbook, municipio, resultado):
     aba = _nova_aba(workbook, "Metadados", ["Campo", "Valor"])
     metricas = resultado["metricas"]
 
-    aba.append(["Ferramenta", "Calculadora de Validação CHIRPS × Pluviômetro"])
+    aba.append(["Ferramenta", "Comparador CHIRPS × Pluviômetro"])
     aba.append(["Município comparado", f"{municipio.nome}/{municipio.uf}"])
     aba.append(["Código IBGE", municipio.codigo_ibge])
     aba.append(["Granularidade detectada no arquivo enviado", resultado["granularidade"]])

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load l10n %}
-{% block title %}Calculadora de Validação — MonitorChuva MT{% endblock %}
+{% block title %}Comparador CHIRPS × Pluviômetro — MonitorChuva MT{% endblock %}
 {% block extra_head %}
 <style>
     .card-calculadora { position: relative; background-color: #ffffff; border-radius: 1rem; padding: 2rem; box-shadow: 0 8px 20px rgba(0,0,0,0.08); width: 100%; max-width: 960px; }
@@ -61,9 +61,9 @@
 {% endblock %}
 {% block content %}
 <div class="card-calculadora">
-    <h1><i class="fas fa-calculator"></i> Calculadora de Validação CHIRPS × Pluviômetro</h1>
+    <h1><i class="fas fa-calculator"></i> Comparador CHIRPS × Pluviômetro</h1>
     <p class="text-muted" style="font-size: 0.9rem;">
-        Envie a chuva medida no seu pluviômetro e compare com o CHIRPS do município escolhido — as mesmas
+        Compare os dados do seu pluviômetro com o CHIRPS do município escolhido — as mesmas
         métricas de validação já usadas nesta plataforma (R², RMSE, MAE, MBE, índice d de Willmott, índice c
         de Camargo-Sentelhas). <strong>Nada é armazenado</strong>: o cálculo acontece só nesta página, e o
         arquivo enviado não é salvo em nenhum lugar.

@@ -3,6 +3,38 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-09-07 (continuação) — Renomeia "Calculadora de Validação CHIRPS × Pluviômetro" para "Comparador CHIRPS × Pluviômetro"
+
+**Pedido do usuário**: coerência com o projeto de mestrado, que descreve
+a funcionalidade como "comparar os dados do seu pluviômetro com o
+CHIRPS". O nome na tela devia usar a mesma linguagem do documento
+aprovado. Só texto visível ao usuário — sem tocar URL, nomes de arquivo
+Python, funções, variáveis ou IDs de elementos.
+
+**Onde trocou**:
+- `core/templates/core/calculadora.html`: `<title>` da aba
+  ("Comparador CHIRPS × Pluviômetro — MonitorChuva MT") e o `<h1>` da
+  página ("Comparador CHIRPS × Pluviômetro"). O `<h1>` também é o
+  cabeçalho do PDF impresso (`window.print()` esconde navbar/rodapé).
+- Subtítulo da página ajustado para "Compare os dados do seu pluviômetro
+  com o CHIRPS do município escolhido — ..." (antes: "Envie a chuva
+  medida no seu pluviômetro e compare com o CHIRPS ...").
+- `templates/base.html` e `core/templates/core/index.html`: link da
+  navbar deixou de ser só "Calculadora" e virou "CHIRPS × Pluviômetro"
+  nas duas navbars (a pública com `base.html` e a própria da Home) — não
+  confunde com o "Comparador de Períodos" da Home (seção interna da
+  visão de município, não link de navbar).
+- `climate/calculadora_exports.py`: célula "Ferramenta" da aba
+  "Metadados" do Excel exportado ("Comparador CHIRPS × Pluviômetro").
+
+**Intocado (de propósito)**: rota `/calculadora/` e `name='calculadora'`
+(links já compartilhados), arquivos `calculadora_validacao.py` /
+`calculadora_exports.py` / `calculadora_narrativas.py`, `view`
+`calculadora`, `CalculadoraValidacaoForm`, classes CSS `.card-calculadora`
+e IDs (`calculadoraFormCard`, `calculadoraAbasButtons`, etc.). O nome do
+arquivo Excel exportado (`validacao_<municipio>_<data>.xlsx`) nunca
+continha "calculadora" — segue igual.
+
 ## 2026-09-07 — Comparador de Períodos na home pública
 
 **Pedido do usuário**: apoio à decisão prático que responde "este período
