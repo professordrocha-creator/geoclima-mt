@@ -881,6 +881,12 @@
         let climatologiaMensalAtual = null;
         let climatologiaInterpretacaoBaseAtual = null;
 
+        // Comparador de Períodos — instância do gráfico e uma flag pra só
+        // religar os onchange dos 3 <select> uma vez por município (evita
+        // acumular listeners duplicados a cada refresh do mesmo período).
+        let comparadorChartInstance = null;
+        let comparadorSelectsWireados = false;
+
         // Estado do gráfico de evolução do SPI — sempre do município
         // ATUALMENTE exibido (resetado a cada renderizarIndicadoresClimaticos,
         // pra não misturar série de um município com outro).
@@ -919,6 +925,7 @@
             intensidade: "Mostra, em cada ano, a média de chuva (mm) nos dias em que efetivamente choveu — indica se a chuva costuma ser fraca ou forte quando ocorre.",
             veranico: "Mostra, em cada ano, o maior número de dias seguidos sem chuva significativa (abaixo de 1mm) — um período seco prolongado dentro do ano.",
             assinatura: "Compara quantos dias choveu (barras) com a força média de cada chuva (linha) no mesmo gráfico — mostra se a chuva está mudando de padrão, por exemplo chovendo em menos dias mas com mais força em cada evento.",
+            comparador: "Soma a chuva do intervalo de meses escolhido (um mês isolado ou vários meses seguidos) e compara com o MESMO intervalo do ano anterior, e com a média histórica desse intervalo — ajuda a responder se este período está mais seco, mais chuvoso ou dentro do normal em relação à mesma época.",
         };
 
         // ==================== ÍCONE "?" DE EXPLICAÇÃO RÁPIDA (cards de número) ====================
@@ -937,6 +944,7 @@
             intensidade: "Média de chuva (mm) só nos dias em que efetivamente choveu naquele ano — indica se a chuva costuma ser fraca ou forte quando ocorre, sem os dias secos puxando a média pra baixo.",
             recordes: "Os anos (ou meses) com maior e menor total de chuva desde o início da série histórica (1981) — referência dos extremos já observados na região.",
             tendencia: "Mudança na chuva anual ao longo dos anos (teste Mann-Kendall + inclinação de Sen) — mm/ano positivo indica aumento, negativo indica redução. O valor de p indica se essa tendência é estatisticamente confiável ou pode ser só variação natural (geralmente, p menor que 0,05 é considerado significativo).",
+            comparador: "Compara o total do período escolhido com o mesmo período do ano anterior e com a média histórica — os meses ainda não publicados pelo CHIRPS não aparecem como opção.",
         };
 
         function escapeAtributoHtml(texto) {
@@ -1110,6 +1118,32 @@
                     ${iconeTooltip("acumulados")}
                 </div>
                 <div class="acumulados-grid" id="acumuladosGrid"></div>
+                <div class="chirps-chart-container mt-3">
+                    <div class="d-flex align-items-center gap-1 mb-2">
+                        <h6 class="section-title mb-0">Comparador de Períodos</h6>
+                        ${iconeTooltip("comparador")}
+                    </div>
+                    <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+                        <div>
+                            <label for="comparadorAnoSelect" class="form-label mb-0" style="font-size: 0.8rem;">Ano</label>
+                            <select id="comparadorAnoSelect" class="form-select form-select-sm"></select>
+                        </div>
+                        <div>
+                            <label for="comparadorMesInicioSelect" class="form-label mb-0" style="font-size: 0.8rem;">Mês inicial</label>
+                            <select id="comparadorMesInicioSelect" class="form-select form-select-sm"></select>
+                        </div>
+                        <div>
+                            <label for="comparadorMesFimSelect" class="form-label mb-0" style="font-size: 0.8rem;">Mês final</label>
+                            <select id="comparadorMesFimSelect" class="form-select form-select-sm"></select>
+                        </div>
+                    </div>
+                    ${htmlBlocoExplicacao("comparador")}
+                    <div class="row g-2 mb-3" id="comparadorResultadoCards"></div>
+                    <div style="position: relative; height: 260px;">
+                        <canvas id="comparadorChart"></canvas>
+                    </div>
+                    <p class="chirps-placeholder mb-0" id="comparadorSemDado" style="display: none;"></p>
+                </div>
             `;
 
             // --- SPI: as 4 escalas sempre nessa ordem, pedido explícito do
@@ -1199,6 +1233,9 @@
                     <div class="acumulado-valor">${item.chirps_mm !== null ? item.chirps_mm.toFixed(1) + " mm" : "aguardando dado"}</div>
                 </div>
             `).join("");
+
+            comparadorSelectsWireados = false;
+            carregarComparadorPeriodos(dados.municipio.id);
 
             inicializarTooltips(container);
         }
@@ -1324,6 +1361,153 @@
                             labels: { filter: (item) => item.text !== "Faixa normal (P75)" },
                         },
                     },
+                    scales: { y: { beginAtZero: true, title: { display: true, text: "mm" } } },
+                },
+            });
+        }
+
+        // ==================== COMPARADOR DE PERÍODOS ====================
+        // Um único fetch faz tudo: manda os 3 parâmetros atuais (ou nenhum,
+        // na 1ª carga), e a resposta já vem com "limites" — os selects são
+        // SEMPRE (re)montados a partir da resposta do servidor, nunca de um
+        // cálculo local, porque o servidor é quem sabe até onde o CHIRPS
+        // realmente publicou (climate.municipio_indicators.
+        // limites_comparador_periodos, mesma fonte de verdade do bug de
+        // virada de mês corrigido antes).
+        async function carregarComparadorPeriodos(municipioId, ano, mesInicio, mesFim) {
+            const params = new URLSearchParams();
+            if (ano) params.set("ano", ano);
+            if (mesInicio) params.set("mes_inicio", mesInicio);
+            if (mesFim) params.set("mes_fim", mesFim);
+            const query = params.toString();
+            const url = `/api/municipios/${municipioId}/comparador-periodos/${query ? "?" + query : ""}`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const dados = await response.json();
+                renderizarComparadorPeriodos(municipioId, dados);
+            } catch (error) {
+                console.error("Erro ao carregar comparador de períodos:", error);
+            }
+        }
+
+        const MESES_ABREV_COMPARADOR = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+        // Preenche um <select> de ANO com o intervalo [ano_minimo, ano_maximo]
+        // que a resposta do servidor mandou.
+        function popularSelectAnoComparador(select, limites, anoSelecionado) {
+            const opcoes = [];
+            for (let ano = limites.ano_minimo; ano <= limites.ano_maximo; ano++) opcoes.push(ano);
+            select.innerHTML = opcoes.map(ano => `<option value="${ano}">${ano}</option>`).join("");
+            select.value = String(anoSelecionado);
+        }
+
+        // Preenche um <select> de MÊS só até `mesMaximoPermitido` — meses
+        // além disso NEM APARECEM como opção (não é só desabilitado), pra
+        // não sugerir um período que o CHIRPS ainda não publicou.
+        function popularSelectMesComparador(select, mesMaximoPermitido, mesSelecionado) {
+            const opcoes = [];
+            for (let mes = 1; mes <= mesMaximoPermitido; mes++) opcoes.push(mes);
+            select.innerHTML = opcoes.map(mes => `<option value="${mes}">${MESES_ABREV_COMPARADOR[mes - 1]}</option>`).join("");
+            select.value = String(mesSelecionado);
+        }
+
+        function renderizarComparadorPeriodos(municipioId, dados) {
+            const cardsEl = document.getElementById("comparadorResultadoCards");
+            const semDadoEl = document.getElementById("comparadorSemDado");
+            if (!cardsEl || !semDadoEl) return;
+
+            if (dados.sem_dado) {
+                cardsEl.innerHTML = "";
+                if (comparadorChartInstance) { comparadorChartInstance.destroy(); comparadorChartInstance = null; }
+                semDadoEl.style.display = "block";
+                semDadoEl.textContent = `Ainda não há CHIRPS suficiente para comparar períodos em ${dados.municipio.nome}/${dados.municipio.uf}.`;
+                preencherExplicacao("comparador", CONCEITOS_GRAFICOS.comparador, null);
+                return;
+            }
+            semDadoEl.style.display = "none";
+
+            const anoSelect = document.getElementById("comparadorAnoSelect");
+            const mesInicioSelect = document.getElementById("comparadorMesInicioSelect");
+            const mesFimSelect = document.getElementById("comparadorMesFimSelect");
+
+            // Mês máximo permitido pros dropdowns de mês: só limitado quando
+            // o ano escolhido é o mais recente disponível — anos totalmente
+            // no passado sempre têm os 12 meses completos.
+            const mesMaximoDoAno = dados.ano === dados.limites.ano_maximo ? dados.limites.mes_maximo_ano_maximo : 12;
+
+            popularSelectAnoComparador(anoSelect, dados.limites, dados.ano);
+            popularSelectMesComparador(mesInicioSelect, mesMaximoDoAno, dados.mes_inicio);
+            popularSelectMesComparador(mesFimSelect, mesMaximoDoAno, dados.mes_fim);
+
+            if (!comparadorSelectsWireados) {
+                comparadorSelectsWireados = true;
+                const aoMudar = () => carregarComparadorPeriodos(
+                    municipioId, anoSelect.value, mesInicioSelect.value, mesFimSelect.value
+                );
+                anoSelect.onchange = aoMudar;
+                mesInicioSelect.onchange = aoMudar;
+                mesFimSelect.onchange = aoMudar;
+            }
+
+            const fmtMm = valor => (valor !== null && valor !== undefined) ? `${valor.toFixed(0)} mm` : "—";
+            const fmtPct = valor => (valor !== null && valor !== undefined) ? `${valor >= 0 ? "+" : ""}${valor.toFixed(0)}%` : "—";
+            const fmtMmComSinal = valor => (valor !== null && valor !== undefined) ? `${valor >= 0 ? "+" : ""}${valor.toFixed(0)} mm` : "—";
+
+            cardsEl.innerHTML = `
+                <div class="col-6 col-md-3"><div class="chirps-info-card h-100">
+                    <div class="chirps-info-title">Este Período</div>
+                    <div class="chirps-info-valor">${fmtMm(dados.total_atual_mm)}</div>
+                </div></div>
+                <div class="col-6 col-md-3"><div class="chirps-info-card h-100">
+                    <div class="chirps-info-title">Mesmo Período — ${dados.ano - 1}</div>
+                    <div class="chirps-info-valor">${fmtMm(dados.total_anterior_mm)}</div>
+                </div></div>
+                <div class="col-6 col-md-3"><div class="chirps-info-card h-100">
+                    <div class="chirps-info-title">Diferença</div>
+                    <div class="chirps-info-valor">${fmtPct(dados.diferenca_percentual)}</div>
+                    <div class="chirps-info-detalhe">${fmtMmComSinal(dados.diferenca_absoluta_mm)}</div>
+                </div></div>
+                <div class="col-6 col-md-3"><div class="chirps-info-card h-100">
+                    <div class="chirps-info-title">vs. Média Histórica</div>
+                    <div class="chirps-info-valor">${fmtPct(dados.comparacao_historica_percentual)}</div>
+                    <div class="chirps-info-detalhe">${dados.media_historica_mm !== null ? `${dados.media_historica_mm.toFixed(0)} mm (${dados.n_anos_historico} anos)` : "histórico insuficiente"}</div>
+                </div></div>
+            `;
+
+            renderizarGraficoComparador(dados.serie_mensal, dados.ano);
+            preencherExplicacao("comparador", CONCEITOS_GRAFICOS.comparador, dados.interpretacao);
+            inicializarTooltips(document.getElementById("chirpsIndicatorsContent"));
+        }
+
+        function renderizarGraficoComparador(serieMensal, ano) {
+            const canvas = document.getElementById("comparadorChart");
+            if (!canvas) return;
+
+            const labels = serieMensal.map(item => MESES_ABREV_COMPARADOR[item.mes - 1]);
+
+            if (comparadorChartInstance) {
+                comparadorChartInstance.destroy();
+            }
+            comparadorChartInstance = new Chart(canvas, {
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { type: "bar", label: String(ano), data: serieMensal.map(i => i.atual), backgroundColor: "#0d6efd" },
+                        { type: "bar", label: String(ano - 1), data: serieMensal.map(i => i.anterior), backgroundColor: "#adb5bd" },
+                        // pointRadius > 0 (não 0 como nos outros gráficos de
+                        // linha) — com um único mês selecionado, a "linha"
+                        // tem 1 ponto só, e um ponto com raio 0 não pinta
+                        // nada. Com vários meses, os pontos + a linha entre
+                        // eles aparecem normalmente.
+                        { type: "line", label: "Média histórica", data: serieMensal.map(i => i.media_historica), borderColor: "#6c757d", borderDash: [5, 5], pointRadius: 4, pointBackgroundColor: "#6c757d", fill: false },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, position: "top" } },
                     scales: { y: { beginAtZero: true, title: { display: true, text: "mm" } } },
                 },
             });

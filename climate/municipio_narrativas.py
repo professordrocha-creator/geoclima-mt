@@ -179,6 +179,78 @@ def interpretar_climatologia_ano(climatologia, totais_mensais_ano, ano):
     return " ".join(partes)
 
 
+def _abrev_mes(mes):
+    return _MESES_NOME[mes - 1][:3]
+
+
+def _rotulo_periodo(ano, mes_inicio, mes_fim):
+    if mes_inicio == mes_fim:
+        return f"{_abrev_mes(mes_inicio)}/{ano}"
+    return f"{_abrev_mes(mes_inicio)}-{_abrev_mes(mes_fim)}/{ano}"
+
+
+def interpretar_comparador_periodos(resultado):
+    """
+    Frase com os números já calculados por
+    municipio_indicators.comparar_periodos: total do período, diferença
+    (absoluta e %) contra o mesmo período do ano anterior, e comparação
+    com a média histórica do mesmo período. Cobre honestamente os casos
+    em que uma das comparações não dá pra fazer (ano anterior sem dado
+    completo, período anterior com 0mm — variação % indefinida,
+    histórico curto demais pra uma média confiável) — nunca omite
+    silenciosamente, sempre diz por que falta.
+    """
+    ano, mes_inicio, mes_fim = resultado["ano"], resultado["mes_inicio"], resultado["mes_fim"]
+    rotulo_atual = _rotulo_periodo(ano, mes_inicio, mes_fim)
+    total_atual = resultado["total_atual_mm"]
+
+    if total_atual is None:
+        return f"Não há CHIRPS suficiente pra calcular o total de {rotulo_atual}."
+
+    partes = [f"O período {rotulo_atual} teve {total_atual:.0f} mm."]
+
+    total_anterior = resultado["total_anterior_mm"]
+    rotulo_anterior = _rotulo_periodo(ano - 1, mes_inicio, mes_fim)
+    diferenca_percentual = resultado["diferenca_percentual"]
+    if total_anterior is None:
+        partes.append(f"Não há CHIRPS suficiente pra comparar com {rotulo_anterior}.")
+    elif diferenca_percentual is None:
+        diferenca_absoluta = resultado["diferenca_absoluta_mm"]
+        partes.append(
+            f"{rotulo_anterior} não teve chuva registrada (0 mm) — a diferença é de "
+            f"{diferenca_absoluta:+.0f} mm, mas a variação percentual não pode ser calculada."
+        )
+    elif round(diferenca_percentual) == 0:
+        # Arredondaria pra "0% mais/menos" — soa estranho quando o valor
+        # real já é praticamente idêntico, não só coincidência de casas
+        # decimais.
+        partes.append(f"Isso é praticamente igual ao mesmo período de {ano - 1} ({total_anterior:.0f} mm).")
+    else:
+        sentido = "mais" if diferenca_percentual >= 0 else "menos"
+        partes.append(
+            f"Isso é {abs(diferenca_percentual):.0f}% {sentido} que o mesmo período de {ano - 1} "
+            f"({total_anterior:.0f} mm)."
+        )
+
+    media_historica = resultado["media_historica_mm"]
+    comparacao_historica_percentual = resultado["comparacao_historica_percentual"]
+    if media_historica is None:
+        partes.append("Histórico insuficiente pra calcular a média histórica desse período.")
+    elif round(comparacao_historica_percentual) == 0:
+        partes.append(
+            f"Está praticamente igual à média histórica do período ({media_historica:.0f} mm, "
+            f"{resultado['n_anos_historico']} anos)."
+        )
+    else:
+        sentido_historico = "acima" if comparacao_historica_percentual >= 0 else "abaixo"
+        partes.append(
+            f"Em relação à média histórica do período ({media_historica:.0f} mm, "
+            f"{resultado['n_anos_historico']} anos), está {abs(comparacao_historica_percentual):.0f}% {sentido_historico}."
+        )
+
+    return " ".join(partes)
+
+
 def interpretar_tendencia_narrativa(tendencia, rotulo_aumento, rotulo_reducao):
     """
     Envolve mi.interpretar_tendencia (já existe, já usada na aba de

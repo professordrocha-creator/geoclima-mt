@@ -40,7 +40,7 @@ validação com série sintética.
 """
 import math
 import statistics
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.core.cache import cache
 from django.db.models import Max, Sum
@@ -163,6 +163,154 @@ def _ultimo_ano_completo_com_dado(municipio=None):
     if ultima_data.month == 12 and ultima_data.day == 31:
         return ultima_data.year
     return ultima_data.year - 1
+
+
+# ---------------------------------------------------------------------
+# Comparador de períodos — novo.
+# ---------------------------------------------------------------------
+
+def limites_comparador_periodos(municipio):
+    """
+    (ano_minimo, ano_maximo, mes_maximo_ano_maximo) pro comparador de
+    períodos — usa _ultimo_mes_completo_com_dado (mesma fonte de
+    verdade que corrigiu o bug de virada de mês) pro limite superior,
+    NUNCA o calendário do servidor. `ano_minimo` é o primeiro ano em
+    que o ano ANTERIOR também tem dado (senão não dá pra comparar).
+    (None, None, None) se não houver CHIRPS suficiente pro município.
+    """
+    municipio = _resolver_municipio(municipio)
+    ano_maximo, mes_maximo = _ultimo_mes_completo_com_dado(municipio)
+    if ano_maximo is None:
+        return None, None, None
+
+    anos_com_dado = {data_mes.year for data_mes in trends.totais_mensais(municipio)}
+    if not anos_com_dado:
+        return None, None, None
+
+    ano_minimo = min(anos_com_dado) + 1
+    if ano_minimo > ano_maximo:
+        return None, None, None
+    return ano_minimo, ano_maximo, mes_maximo
+
+
+def _somar_intervalo_mensal(totais_por_mes, ano, mes_inicio, mes_fim):
+    """Soma totais_mensais[date(ano, mes, 1)] pra cada mes em
+    [mes_inicio, mes_fim] — None se QUALQUER mês do intervalo não tiver
+    dado (intervalo incompleto não vira total parcial silencioso)."""
+    valores = []
+    for mes in range(mes_inicio, mes_fim + 1):
+        valor = totais_por_mes.get(date(ano, mes, 1))
+        if valor is None:
+            return None
+        valores.append(valor)
+    return sum(valores)
+
+
+def _somar_intervalo_climatologia(climatologia, mes_inicio, mes_fim):
+    """
+    Média histórica do INTERVALO = soma da média histórica de cada mês
+    do intervalo (climatologia[mes]["media"]) — matematicamente
+    equivalente à média das somas anuais do intervalo (linearidade da
+    esperança: E[soma] = soma das E[]), então não precisa de uma conta
+    nova nem de outra query, só somar o que climatologia_mensal já
+    calcula (e já cacheia). `n_anos` devolvido é o MENOR entre os meses
+    somados — o mais conservador, não o maior. (None, None) se algum
+    mês do intervalo não tiver climatologia calculável.
+    """
+    total = 0.0
+    n_anos_minimo = None
+    for mes in range(mes_inicio, mes_fim + 1):
+        normal_do_mes = climatologia.get(mes)
+        if normal_do_mes is None:
+            return None, None
+        total += normal_do_mes["media"]
+        n_anos_minimo = normal_do_mes["n_anos"] if n_anos_minimo is None else min(n_anos_minimo, normal_do_mes["n_anos"])
+    return total, n_anos_minimo
+
+
+def comparar_periodos(municipio, ano=None, mes_inicio=None, mes_fim=None):
+    """
+    Compara o total de chuva de um intervalo de meses (mes_inicio..
+    mes_fim, mesmo ano civil) contra o MESMO intervalo do ano anterior,
+    e contra a média histórica desse intervalo. Cobre tanto "um mês
+    isolado" (mes_inicio == mes_fim) quanto "período acumulado"
+    (ex.: jan-mai) com a mesma função — não tem modo separado.
+
+    ano/mes_inicio/mes_fim None usa o ÚLTIMO MÊS COMPLETO sozinho
+    (não o ano inteiro). Todos os parâmetros são VALIDADOS/LIMITADOS
+    aqui contra o último mês REALMENTE publicado no CHIRPS — nunca
+    contra o calendário do servidor, e nunca confiando cegamente no
+    que foi pedido (alguém pode chamar o endpoint direto com
+    mes_fim=13 ou um ano futuro). Pedir agosto/2026 quando só há dado
+    até julho devolve o resultado como se tivesse pedido julho, não
+    erro nem dado inventado.
+
+    Retorna None se o município não tiver CHIRPS suficiente pra
+    comparar (menos de 2 anos de histórico).
+    """
+    municipio = _resolver_municipio(municipio)
+    ano_minimo, ano_maximo, mes_maximo_ano_maximo = limites_comparador_periodos(municipio)
+    if ano_maximo is None:
+        return None
+
+    if ano is None:
+        ano = ano_maximo
+        mes_inicio = mes_fim = mes_maximo_ano_maximo
+
+    ano = max(ano_minimo, min(int(ano), ano_maximo))
+    mes_inicio = max(1, min(int(mes_inicio or 1), 12))
+    mes_fim = max(1, min(int(mes_fim or mes_inicio), 12))
+    if mes_inicio > mes_fim:
+        mes_inicio, mes_fim = mes_fim, mes_inicio
+    if ano == ano_maximo:
+        mes_inicio = min(mes_inicio, mes_maximo_ano_maximo)
+        mes_fim = min(mes_fim, mes_maximo_ano_maximo)
+
+    totais = trends.totais_mensais(municipio)
+    climatologia = trends.normais_climatologicas_mensais(municipio)
+
+    total_atual = _somar_intervalo_mensal(totais, ano, mes_inicio, mes_fim)
+    total_anterior = _somar_intervalo_mensal(totais, ano - 1, mes_inicio, mes_fim)
+    media_historica, n_anos_historico = _somar_intervalo_climatologia(climatologia, mes_inicio, mes_fim)
+    if n_anos_historico is not None and n_anos_historico < MINIMO_ANOS_NORMAL_CLIMATOLOGICA:
+        media_historica, n_anos_historico = None, None
+
+    diferenca_absoluta = None
+    diferenca_percentual = None
+    if total_atual is not None and total_anterior is not None:
+        diferenca_absoluta = total_atual - total_anterior
+        # total_anterior == 0 (chuva real zero no período): variação
+        # percentual indefinida, não um erro — fica None de propósito.
+        diferenca_percentual = (diferenca_absoluta / total_anterior * 100) if total_anterior else None
+
+    comparacao_historica_percentual = None
+    if total_atual is not None and media_historica:
+        comparacao_historica_percentual = (total_atual - media_historica) / media_historica * 100
+
+    serie_mensal = [
+        {
+            "mes": mes,
+            "atual": totais.get(date(ano, mes, 1)),
+            "anterior": totais.get(date(ano - 1, mes, 1)),
+            "media_historica": climatologia[mes]["media"] if mes in climatologia else None,
+        }
+        for mes in range(mes_inicio, mes_fim + 1)
+    ]
+
+    return {
+        "limites": {"ano_minimo": ano_minimo, "ano_maximo": ano_maximo, "mes_maximo_ano_maximo": mes_maximo_ano_maximo},
+        "ano": ano,
+        "mes_inicio": mes_inicio,
+        "mes_fim": mes_fim,
+        "total_atual_mm": total_atual,
+        "total_anterior_mm": total_anterior,
+        "diferenca_absoluta_mm": diferenca_absoluta,
+        "diferenca_percentual": diferenca_percentual,
+        "media_historica_mm": media_historica,
+        "n_anos_historico": n_anos_historico,
+        "comparacao_historica_percentual": comparacao_historica_percentual,
+        "serie_mensal": serie_mensal,
+    }
 
 
 def _totais_do_mes_por_ano(municipio, mes):

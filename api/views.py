@@ -503,3 +503,52 @@ def municipio_climatologia_ano(request, municipio_id):
         "totais_mensais_ano": {str(mes): valor for mes, valor in totais_mensais_ano.items()},
         "interpretacao": interpretacao,
     })
+
+
+def _int_ou_none(valor):
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return None
+
+
+def municipio_comparador_periodos(request, municipio_id):
+    """
+    GET /api/municipios/<id>/comparador-periodos/?ano=2026&mes_inicio=1&mes_fim=5
+    — compara o total de chuva de um intervalo de meses contra o mesmo
+    intervalo do ano anterior e contra a média histórica (climate.
+    municipio_indicators.comparar_periodos faz toda a conta e a
+    validação/limite dos parâmetros — esta view só decodifica a query
+    string e serializa).
+
+    Os 3 parâmetros são opcionais e SEMPRE revalidados no backend contra
+    o último mês REALMENTE publicado no CHIRPS (nunca confia no que o
+    cliente mandou) — pedir mes_fim=8 quando só há dado até julho não
+    quebra nem inventa dado, só devolve como se tivesse pedido julho (o
+    "ano"/"mes_inicio"/"mes_fim" efetivamente usados vêm de volta na
+    resposta, pra o frontend saber e realinhar os seletores).
+
+    Município sem CHIRPS suficiente pra comparar (menos de 2 anos)
+    devolve `sem_dado: true`, sempre 200.
+    """
+    municipio = get_object_or_404(Municipio, pk=municipio_id)
+
+    resultado = mi.comparar_periodos(
+        municipio,
+        ano=_int_ou_none(request.GET.get("ano")),
+        mes_inicio=_int_ou_none(request.GET.get("mes_inicio")),
+        mes_fim=_int_ou_none(request.GET.get("mes_fim")),
+    )
+
+    if resultado is None:
+        return JsonResponse({
+            "municipio": {"id": municipio.id, "nome": municipio.nome, "uf": municipio.uf},
+            "sem_dado": True,
+        })
+
+    return JsonResponse({
+        "municipio": {"id": municipio.id, "nome": municipio.nome, "uf": municipio.uf},
+        "sem_dado": False,
+        "interpretacao": nar.interpretar_comparador_periodos(resultado),
+        **resultado,
+    })

@@ -3,6 +3,82 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-09-07 — Comparador de Períodos na home pública
+
+**Pedido do usuário**: apoio à decisão prático que responde "este período
+está melhor ou pior que o ano passado nesta época?" — comparando um mês
+isolado (ex.: mai/2026 × mai/2025) ou um período acumulado (ex.:
+jan-mai/2026 × jan-mai/2025, a "safra até agora").
+
+**Interface**: um único grupo de seletores (Ano + Mês inicial + Mês
+final), não dois períodos independentes — o sistema compara
+automaticamente com o MESMO intervalo do ano anterior. Cobre os dois
+casos (mês isolado = mês inicial igual ao final) com metade dos
+controles. Atualiza sozinho ao trocar qualquer seletor (mesmo padrão do
+dropdown de ano da Climatologia), sem botão "comparar". Estado inicial:
+o último mês completo sozinho, zero cliques pra ver algo útil.
+
+**Trava crítica (o requisito mais importante do pedido)**: os dropdowns
+de mês NÃO RENDERIZAM (não é só desabilitado) meses além do último
+publicado no CHIRPS quando o ano escolhido é o mais recente disponível
+— usa `_ultimo_mes_completo_com_dado` (o mesmo helper que corrigiu o
+bug de virada de mês). Validado nos DOIS lados: o front só monta as
+opções que existem, e o backend (`climate/municipio_indicators.py:
+comparar_periodos`) reaplica o mesmo limite sem confiar no que veio na
+query string — testado chamando o endpoint direto com `mes_fim=8`,
+`mes_inicio=9`, e `ano=2030` (todos além do publicado): nenhum foi
+aceito, todos voltaram clampeados pro último mês real (julho/2026).
+
+**Backend, sem lógica nova duplicada**: `comparar_periodos(municipio,
+ano, mes_inicio, mes_fim)` soma `climate.trends.totais_mensais` pros
+dois anos, e pra "média histórica do intervalo" soma a chave `"media"`
+de `climate.trends.normais_climatologicas_mensais` mês a mês — soma de
+médias mensais é matematicamente equivalente à média das somas anuais
+(linearidade da esperança), então não precisou de nenhuma conta nova
+nem query nova, só reaproveitar o que a climatologia já calcula e já
+cacheia. `n_anos` reportado é o MENOR entre os meses somados (mais
+conservador). Nova rota `GET /api/municipios/<id>/comparador-periodos/`
+(`ano`/`mes_inicio`/`mes_fim` opcionais), sempre 200 mesmo sem CHIRPS
+(`sem_dado: true`). `climate/municipio_narrativas.py` ganhou
+`interpretar_comparador_periodos` — descreve os 2-3 números sempre,
+nunca some silenciosamente quando uma comparação não dá (ano anterior
+sem dado, período anterior com 0mm → variação % indefinida em vez de
+erro de divisão, histórico curto demais pra média confiável).
+
+**Frontend**: novo bloco em `chirpsIndicatorsContent`, logo depois de
+"Chuva Acumulada Recente" — 4 cards de resultado (Este Período / Mesmo
+Período ano anterior / Diferença / vs. Média Histórica), gráfico de
+barras agrupadas por mês do intervalo (funciona igual pra 1 mês ou
+vários, sem dois modos de gráfico) com uma linha tracejada da média
+histórica sobreposta, ℹ️ (conceito + interpretação, mesmo padrão dos
+outros 9 gráficos) e um ícone "?" no cabeçalho da seção (mesmo padrão
+dos cards de número da entrada anterior).
+
+**Bug pego e corrigido durante o teste visual** (não só leitura de
+número): no estado inicial (1 mês só selecionado), a linha tracejada da
+"Média histórica" não aparecia — um dataset `type: "line"` com um único
+ponto e `pointRadius: 0` não desenha nada (precisa de 2+ pontos pra
+desenhar um segmento). Corrigido com `pointRadius: 4` — com 1 mês
+aparece como um ponto sozinho, com vários meses aparece como pontos
+conectados por linha, sem precisar de dois códigos diferentes.
+
+**Testado com Playwright real contra Cáceres** (screenshots + leitura
+de DOM, não só chamada HTTP): mai/2026 × mai/2025 —
+*"O período mai/2026 teve 44 mm. Isso é 35% menos que o mesmo período
+de 2025 (67 mm). Em relação à média histórica do período (48 mm, 46
+anos), está 9% abaixo."* — e jan-mai/2026 × jan-mai/2025 —
+*"O período jan-mai/2026 teve 694 mm. Isso é praticamente igual ao
+mesmo período de 2025 (694 mm). Em relação à média histórica do
+período (686 mm, 46 anos), está 1% acima."* (esse segundo caso também
+pegou um ajuste de texto: a diferença real é de 0,07%, que arredondaria
+pra "0% mais" — trocado por "praticamente igual" quando a variação
+arredonda pra zero, pros dois lados da comparação). Confirmado
+visualmente que o dropdown de mês vai só até Jul quando o ano é 2026
+(nunca mostra Ago/Set), testado responsivo (viewport mobile real via
+Playwright) e o tooltip "?" funciona no toque. Município sem CHIRPS
+(`sem_dado: true`) testado contra um município inativo de fora de MT.
+Não tocou painel privado nem calculadora.
+
 ## 2026-09-06 (continuação 8) — Ícone "?" de explicação em todos os cards de número (Home + Calculadora)
 
 **Pedido do usuário**: os cards de número (ex.: "RMSE 23,64") não
