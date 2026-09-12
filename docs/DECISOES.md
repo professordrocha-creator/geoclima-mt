@@ -1734,3 +1734,122 @@ reenviar o arquivo. Considerado um custo pequeno frente ao ganho de
 clareza ética — decisão do usuário, não uma limitação técnica que
 não dava pra contornar (a Opção B era viável, só abria mão do
 argumento mais forte).
+
+## 2026-09-12 — Tiles do Leaflet trocados de OSM público para Esri (CARTO cogitado e descartado)
+
+**Problema confirmado:** o tile server público do OpenStreetMap
+(`tile.openstreetmap.org`) começou a devolver HTTP 403 em produção —
+política de uso justo do OSM, que não permite depender do tile server
+público fora de uso leve/eventual. Não era um bug de configuração do
+projeto, é o próprio provedor recusando o tráfego.
+
+**Primeira tentativa — CARTO Basemaps (recomendação inicial do
+usuário, "gratuito, sem chave de API"): testada e descartada.** O
+`curl` direto na URL (`basemaps.cartocdn.com`) devolvia HTTP 200, o
+que pareceria confirmar que funciona — mas o **conteúdo da imagem**
+retornada é um tile placeholder com a marca d'água "API KEY REQUIRED"
+por cima do mapa (confirmado abrindo o PNG de verdade, não só o status
+HTTP). Ou seja: a camada gratuita/anônima do CARTO Basemaps não existe
+mais como tal — hoje exige cadastro e chave de API mesmo pro uso mais
+básico. **Lição**: status 200 não prova que um tile carregou de
+verdade; é preciso abrir a imagem (ou um teste real em navegador) pra
+confirmar conteúdo, não só código de resposta.
+
+**Escolha final — Esri (ArcGIS Online), serviços REST legados em
+`server.arcgisonline.com`:** gratuito, sem chave de API, mesmos dados
+de mapa-base que a comunidade usa há mais de uma década sem cobrança
+(usado, por exemplo, como preset padrão no projeto `leaflet-providers`).
+Confirmado com teste real (Playwright, navegador de verdade, não só
+`curl`): tiles carregando com conteúdo de mapa real, HTTP 200, em
+`/` (mapa principal e choropleth) e em `/painel/fazendas/nova/`
+(mapa "clique para marcar", logado como `admin_demo`) — zero
+requisições restantes para `tile.openstreetmap.org` ou
+`cartocdn.com` em toda a aplicação (confirmado por grep no código E
+pela lista de requisições de rede capturada no navegador).
+
+**Duas variantes**, mesmo espírito da sugestão original do usuário
+pro CARTO (fundo discreto onde há dado colorido por cima, visual de
+mapa tradicional onde o usuário precisa de referência de rua):
+
+- **`World_Topo_Map`** (visual de mapa de ruas, com nomes de rua/rio
+  visíveis até zoom alto) — mapa principal da Home e os três mapas
+  "clique para marcar" (`farms/form_fazenda.html`,
+  `farms/form_talhao.html`, `stations/form_estacao.html`), onde o
+  usuário precisa de referência de rua/relevo pra marcar a localização
+  com precisão.
+- **`Canvas/World_Light_Gray_Base`** (fundo cinza claro, discreto,
+  ainda com malha viária e nomes de rio em zoom alto) — choropleth de
+  MT da Home e os mapas que desenham dado por cima
+  (`farms/detalhe_fazenda.html`, `farms/lista_fazendas.html`,
+  `dashboard/painel.html`), pra não competir visualmente com
+  polígono/marcadores/cores.
+
+Atribuição trocada de "OpenStreetMap contributors" (+ "CARTO" na
+tentativa anterior) para o texto de atribuição do Esri (varia por
+camada — `World_Topo_Map` cita a lista completa de provedores parceiros
+do Esri, `World_Light_Gray_Base` é mais curta). URL do tile do Esri usa
+ordem `{z}/{y}/{x}` (não `{z}/{x}/{y}` como OSM/CARTO) — detalhe fácil
+de errar ao copiar o padrão de outro provedor.
+
+Nada além da URL do tile e da atribuição mudou: `maxZoom: 19` continua
+o mesmo em todos os mapas (mesmo o `World_Light_Gray_Base` nativamente
+tendo menos zoom nativo que isso — acima do zoom nativo o Leaflet só
+reaproveita o último tile ampliado, comportamento padrão, não um erro
+introduzido aqui).
+
+## 2026-09-12 (continuação) — World_Topo_Map trocado por World_Street_Map (atribuição mais curta)
+
+**Problema**: `World_Topo_Map` soma 15 fontes na atribuição exigida
+("Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN,
+GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China
+(Hong Kong), and the GIS User Community") — texto muito longo no
+rodapé do mapa. A licença exige citar todas; a única forma correta de
+encurtar é usar uma variante que precise de menos fontes, não cortar a
+lista.
+
+**Como as atribuições foram conferidas**: não de memória — consultado
+o código-fonte do `leaflet-providers` (projeto open-source de
+referência da comunidade Leaflet para presets de provedor,
+`leaflet-providers.js` no GitHub), que documenta a URL e a string de
+atribuição exata de cada variante Esri (`WorldStreetMap`,
+`WorldTopoMap`, `WorldImagery`, `WorldTerrain`, `WorldShadedRelief`,
+`WorldPhysical`, `OceanBasemap`, `NatGeoWorldMap`, `WorldGrayCanvas`).
+
+**Variantes avaliadas para os mapas de rua (mapa principal + 3
+"clique para marcar")**:
+
+| Variante | Nº de fontes citadas | Tem nome de rua/cidade? |
+|---|---|---|
+| `World_Topo_Map` (anterior) | 15 + "GIS User Community" | Sim |
+| `World_Street_Map` | 12 | Sim — testado até zoom de rua (nomes de avenida, código de rodovia "MT-480"/"MT-358") |
+| `World_Terrain_Base` | 5 | **Não** — testado e retornou tile "Map data not yet available" na região de MT no zoom necessário (sem cobertura, não é um placeholder de erro do servidor) |
+| `World_Shaded_Relief` | 1 (só "Esri") | Não — é só relevo sombreado, sem rótulo de rua/cidade, inutilizável pra marcar ponto |
+| `World_Imagery` (satélite) | 12 | Não tem rótulo de texto por padrão (só a imagem) |
+| `Canvas/World_Light_Gray_Base` (já em uso no choropleth) | 3 (mais curta) | Malha viária visível mas **sem nome de rua/cidade** (os rótulos ficam numa camada `_Reference` separada, que não estava em uso) |
+
+**Escolha: `World_Street_Map`** — segunda menor atribuição da tabela
+(atrás só do Gray Canvas e do Shaded Relief, ambos descartados por
+falta de legibilidade), com nomes de rua, avenida e rodovia visíveis
+em zoom de detalhe — exatamente o que o usuário marcando um ponto
+precisa. `Light_Gray_Base` sozinho foi descartado pra esse papel:
+teria a atribuição mais curta possível, mas sem rótulo de rua/cidade
+o usuário se perderia tentando clicar num ponto exato (a mesma camada
+continua correta pro choropleth e pros mapas de fazenda/estação já
+existentes, onde o dado desenhado por cima é que dá a referência, não
+o mapa-base).
+
+**Trocado em**: mapa principal da Home
+(`core/templates/core/index.html`) e os três "clique para marcar"
+(`farms/form_fazenda.html`, `farms/form_talhao.html`,
+`stations/form_estacao.html`). Atribuição final: `"Tiles © Esri —
+Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan,
+METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012"` (texto
+exato do `leaflet-providers`, sem cortar nenhuma fonte). Choropleth e
+os mapas de fazenda/estação/painel continuam em
+`Canvas/World_Light_Gray_Base`, inalterados.
+
+**Armadilha evitada**: `World_Terrain_Base` devolveu HTTP 200 com um
+tile de imagem escrito "Map data not yet available" pra região de MT —
+mesma lição do CARTO (status 200 não garante conteúdo válido), por
+isso essa variante foi descartada só depois de abrir a imagem, não só
+olhar o código de resposta.

@@ -116,8 +116,13 @@
 
     function inicializarMapa() {
         mapa = L.map("mapaFazenda").setView([-14.6, -57.4], 5);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            attribution: "&copy; OpenStreetMap contributors",
+        // Esri World Street Map — visual de mapa de ruas tradicional, bom pra
+        // reconhecer ruas/referências ao clicar e marcar a localização (CARTO
+        // foi cogitado primeiro, mas exige chave de API agora — ver
+        // docs/DECISOES.md). Trocado de World_Topo_Map pra esta variante
+        // porque a atribuição exigida é mais curta, mesma legibilidade.
+        L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+            attribution: "Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012",
             maxZoom: 19,
         }).addTo(mapa);
 

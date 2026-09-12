@@ -178,8 +178,11 @@
     {% endlocalize %}
 
     const mapaFazendas = L.map("mapaFazendas");
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; OpenStreetMap contributors",
+    // Esri World Light Gray Canvas — fundo discreto, não compete com os
+    // marcadores das fazendas desenhados por cima (CARTO foi cogitado
+    // primeiro, mas exige chave de API agora — ver docs/DECISOES.md).
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+        attribution: "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
         maxZoom: 19,
     }).addTo(mapaFazendas);
 

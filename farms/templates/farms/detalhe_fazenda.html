@@ -257,8 +257,11 @@
     const poligonoFazenda = {% if fazenda.poligono %}{{ fazenda.poligono.geojson|safe }}{% else %}null{% endif %};
 
     const mapa = L.map("mapaDetalheFazenda");
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; OpenStreetMap contributors",
+    // Esri World Light Gray Canvas — fundo discreto, não compete com o
+    // polígono da fazenda/estações desenhados por cima (CARTO foi cogitado
+    // primeiro, mas exige chave de API agora — ver docs/DECISOES.md).
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+        attribution: "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
         maxZoom: 19,
     }).addTo(mapa);
 

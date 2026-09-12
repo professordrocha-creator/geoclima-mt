@@ -603,8 +603,15 @@
             try {
                 map = L.map("map").setView([-14.6, -57.4], 6); // Coordenadas padrão de MT, zoom 6
 
-                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-                    attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+                // Esri World Street Map (não o tile server público do OSM —
+                // ver docs/DECISOES.md; CARTO foi cogitado primeiro, mas
+                // testado e descartado por exigir chave de API agora): visual
+                // de mapa de ruas tradicional, bom pro mapa principal
+                // navegável. Trocado de World_Topo_Map pra esta variante
+                // porque a atribuição exigida é mais curta (12 fontes citadas
+                // em vez de 15+) mantendo a mesma legibilidade de rua/cidade.
+                L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+                    attribution: "Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012",
                     maxZoom: 19,
                 }).addTo(map);
 
@@ -638,8 +645,12 @@
 
             try {
                 choroplethMapInstance = L.map("choroplethMap", { maxBoundsViscosity: 1.0 }).setView([-12.6, -55.9], 5);
-                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-                    attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+                // Esri World Light Gray Canvas — fundo discreto, ideal pra não
+                // competir com as cores do choropleth desenhado por cima (CARTO
+                // foi cogitado primeiro, mas exige chave de API agora — ver
+                // docs/DECISOES.md).
+                L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+                    attribution: "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
                     maxZoom: 19,
                 }).addTo(choroplethMapInstance);
 

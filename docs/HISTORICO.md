@@ -3,6 +3,100 @@
 > Changelog do projeto. As entradas de 2026-06-19 foram migradas de
 > `requisitos/requisitos.md` (arquivo original mantido intacto no repo).
 
+## 2026-09-12 (continuação) — World_Topo_Map trocado por World_Street_Map (atribuição mais curta)
+
+**Pedido do usuário**: o `World_Topo_Map` (entrada anterior) exige
+citar 15 fontes na atribuição — texto muito longo no rodapé do mapa.
+Trocar pela variante Esri com a atribuição mais curta possível sem
+perder legibilidade suficiente pra marcar um ponto no mapa.
+
+**Atribuições conferidas na fonte, não de memória**: consultado o
+código-fonte do `leaflet-providers` (projeto open-source de referência
+da comunidade Leaflet) pra pegar a URL e o texto de atribuição exato
+de cada variante Esri, em vez de confiar no que "parecia certo".
+
+**Avaliadas e descartadas**: `World_Light_Gray_Base` (atribuição mais
+curta de todas, mas sem nome de rua/cidade — só a camada `_Reference`
+separada tem rótulo, e não estava em uso — o usuário se perderia
+tentando marcar um ponto exato); `World_Shaded_Relief` (atribuição de
+1 fonte só, mas é relevo sem nenhum rótulo); `World_Terrain_Base`
+(atribuição curta, mas devolveu tile "Map data not yet available" pra
+região de MT no zoom necessário — HTTP 200 com conteúdo inválido,
+mesma armadilha do CARTO, só descoberta porque a imagem foi aberta de
+verdade); `World_Imagery` (satélite, sem rótulo de texto por padrão).
+
+**Escolhido: `World_Street_Map`** — 12 fontes na atribuição (contra 15
+do Topo Map), com nomes de rua/avenida/rodovia visíveis em zoom de
+detalhe (testado de verdade sobre Tangará da Serra/MT: apareceram
+"Avenida Tancredo Neves", "MT-480", "MT-358" etc.). Trocado no mapa
+principal da Home (`core/templates/core/index.html`) e nos três
+"clique para marcar" (`farms/form_fazenda.html`,
+`farms/form_talhao.html`, `stations/form_estacao.html`). Choropleth e
+os mapas de fazenda/estação/painel continuam em
+`Canvas/World_Light_Gray_Base`, sem mudança.
+
+**Testado de verdade** (Playwright, screenshot, não só HTTP 200):
+mapa principal da Home com cidades legíveis (Cacoal, Vilhena, Sinop,
+Cuiabá) e atribuição correta; formulário de nova fazenda
+(`/painel/fazendas/nova/`, logado como `admin_demo`) com zoom de rua
+de verdade sobre Tangará da Serra mostrando nome de rua/avenida/
+rodovia claramente legíveis — confirma que a legibilidade pra marcar
+ponto não foi perdida na troca. 27 requisições de tile
+`World_Street_Map` + 18 de `World_Light_Gray_Base` (choropleth),
+todas HTTP 200. Detalhe completo da comparação entre variantes em
+docs/DECISOES.md.
+
+## 2026-09-12 — Tiles do Leaflet: OSM público (403 em produção) trocado por Esri
+
+**Pedido do usuário**: o tile server público do OpenStreetMap passou a
+devolver HTTP 403 em produção (política de uso justo do OSM, que não
+permite depender do tile server público fora de uso leve/eventual).
+Trocar o provedor de tiles em todos os mapas Leaflet do projeto,
+mantendo layout/polígonos/legendas/cliques idênticos — só URL do tile
+e atribuição.
+
+**Recomendação inicial do usuário (CARTO Basemaps) testada e
+descartada**: o `curl` na URL do CARTO devolvia HTTP 200, mas abrindo
+o PNG de verdade a imagem vinha com marca d'água "API KEY REQUIRED" —
+a camada gratuita/anônima do CARTO Basemaps não existe mais como tal,
+hoje exige cadastro. Só foi descoberto porque o teste real (abrir a
+imagem, depois confirmar em navegador) foi feito antes de dar a
+funcionalidade por concluída — status HTTP sozinho não prova que o
+tile carregou de verdade. Detalhe completo em docs/DECISOES.md.
+
+**Escolha final**: Esri (ArcGIS Online), serviços REST legados em
+`server.arcgisonline.com` — gratuito, sem chave de API, estável há
+mais de uma década (mesmo provedor usado como preset padrão no projeto
+open-source `leaflet-providers`). Duas variantes, mesmo espírito da
+sugestão original do usuário: `World_Topo_Map` (mapa de ruas
+tradicional) no mapa principal da Home e nos três mapas "clique para
+marcar" (`farms/form_fazenda.html`, `farms/form_talhao.html`,
+`stations/form_estacao.html`); `Canvas/World_Light_Gray_Base` (fundo
+cinza discreto) no choropleth de MT da Home e nos mapas que desenham
+dado por cima (`farms/detalhe_fazenda.html`,
+`farms/lista_fazendas.html`, `dashboard/painel.html`) — 8 ocorrências
+de `L.tileLayer()` no total, todas trocadas.
+
+**Atribuição**: mantida e visível em todos os mapas, ajustada pro
+texto exigido pelo Esri (varia por camada: `World_Topo_Map` cita a
+lista completa de parceiros do Esri, `World_Light_Gray_Base` é mais
+curta). Nada além de URL/atribuição mudou — `maxZoom: 19` ficou igual
+em todos.
+
+**Testado de verdade** (Playwright, navegador real, não só
+`curl`/código): Home (mapa principal + choropleth) com captura de
+tela confirmando mapa renderizado (sem marca d'água) e lista de
+requisições de rede só com `arcgisonline.com`, todas HTTP 200, zero
+requisição pra `tile.openstreetmap.org` ou `cartocdn.com`; painel
+privado logado como `admin_demo` (usuário de teste) no formulário de
+nova fazenda (`/painel/fazendas/nova/`, mapa "clique para marcar") com
+o mesmo resultado. `lista_fazendas`/`painel`/`form_talhao`/
+`form_estacao` usam o mesmo bloco de código (byte-idêntico) já
+confirmado nos outros três — não puderam ser fotografados porque o
+`admin_demo` não tem fazenda cadastrada (esses mapas só renderizam
+`{% if fazendas %}`/dependem de uma fazenda existente), não por causa
+da troca de tile.
+
 ## 2026-09-07 (continuação) — Renomeia "Calculadora de Validação CHIRPS × Pluviômetro" para "Comparador CHIRPS × Pluviômetro"
 
 **Pedido do usuário**: coerência com o projeto de mestrado, que descreve
